@@ -8,7 +8,7 @@ function uptimeStr() {
   return [h, m, s].map((v) => String(v).padStart(2, '0')).join(':')
 }
 
-export const helpText = `⚓ Dwnld7bot v1.2.1
+export const helpText = `⚓ Dwnld7bot v1.3.0
 
 Descargas a disco hasta ~2GB.
 Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con servidor local), comprime o manda link.

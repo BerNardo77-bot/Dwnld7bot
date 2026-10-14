@@ -1,3 +1,4 @@
+import { offerOversize } from '../oversize.js'
 import fetch from 'node-fetch'
 import fs from 'fs'
 import { pipeline } from 'stream/promises'
@@ -613,14 +614,15 @@ async function deliver(ctx, st, { caption, name, size, link, maxSend, download }
     cap +
     `\n\nPesa más de ${mbTxt(maxSend)}: Telegram no deja subirlo por el bot.\n` +
     'Abre el link en el navegador para descargarlo.'
-  if (size > maxSend) return st.say(tooBigMsg(caption))
+  const offer = (sz) => { st.clear?.().catch?.(() => {}); return offerOversize(ctx, { size: sz, kind: /\.(mp4|mkv|webm|mov)$/i.test(name) ? 'video' : 'document', fileName: name, caption, link, fetchFile: async (max) => (await download(max)).file }) }
+  if (size > maxSend) return offer(size)
   await st.progress(`⏬ Descargando ${name}...`)
   let dl
   try {
     dl = await download(maxSend)
   } catch (e) {
     if (e?.message === 'TOO_BIG') {
-      return st.say(tooBigMsg(caption.replace(/Tamaño: .*/, `Tamaño: más de ${mbTxt(maxSend)}`)))
+      return offer(0)
     }
     throw e
   }

@@ -1,4 +1,5 @@
 import { setSendLimit } from './api.js'
+import { offerOversize, registerOversize } from './oversize.js'
 import { findTiktokUrls } from './tt-url.js'
 import 'dotenv/config'
 import fs from 'fs'
@@ -282,36 +283,10 @@ async function sendOrCompress(ctx, filePath, { kind, fileName, caption, statusId
   let compressedPath = null
 
   if (size > MAX_SEND) {
-    if (statusId) {
-      await ctx.api
-        .editMessageText(
-          ctx.chat.id,
-          statusId,
-          `Pesa ${mb(size)} MB. Tope de envio ${mb(MAX_SEND)} MB. Comprimiendo...`
-        )
-        .catch(() => {})
-    }
-    compressedPath = await compressForTelegram(pathToSend, MAX_SEND)
-    if (compressedPath && fs.existsSync(compressedPath)) {
-      pathToSend = compressedPath
-      size = fs.statSync(pathToSend).size
-    }
-  }
-
-  if (size > MAX_SEND) {
-    const msg =
-      `Archivo ${mb(fs.statSync(filePath).size)} MB` +
-      (compressedPath ? ` (comprimido ${mb(size)} MB)` : '') +
-      `.\nTope de envio a Telegram: ${mb(MAX_SEND)} MB.\n` +
-      `Si es muy largo, prueba /play (audio) o abre el link.\n` +
-      (fallbackLink ? `\nEnlace directo:\n${fallbackLink}` : '')
-    if (statusId) {
-      await ctx.api.editMessageText(ctx.chat.id, statusId, msg).catch(() => ctx.reply(msg))
-    } else {
-      await ctx.reply(msg)
-    }
-    safeUnlink(compressedPath)
-    return false
+    return offerOversize(ctx, {
+      file: filePath, kind, fileName, caption, statusId, link: fallbackLink || '',
+      linkNote: fallbackLink && !/youtu|xnxx\.com|xvideos\.com|tiktok\.com|x\.com|twitter\.com/i.test(fallbackLink) ? 'Ese enlace puede vencer en unas horas.' : ''
+    })
   }
 
   const input = new InputFile(pathToSend, fileName)
@@ -697,6 +672,7 @@ const handleX = createXHandler(sendOrCompress, { maxSend: MAX_SEND })
 
 createPodcastHandlers({ maxSend: MAX_SEND }).register(bot)
 ytPicker.register(bot)
+registerOversize(bot)
 const nsfwPicker = createNsfwPicker({ sendOrCompress, maxSend: MAX_SEND })
 nsfwPicker.register(bot)
 bot.command(['start', 'help', 'menu'], handleHelp)
@@ -844,7 +820,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.2.1 arrancando...')
+console.log('Dwnld7bot v1.3.0 arrancando...')
 
 async function goOnline() {
   try {

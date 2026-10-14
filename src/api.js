@@ -11,7 +11,7 @@ import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
 const FALLBACK_KEY = 'LUFFY-FIX67'
-export const MAX_DOWNLOAD = Number(process.env.MAX_DOWNLOAD_BYTES || 2 * 1024 * 1024 * 1024) // 2GB
+export const MAX_DOWNLOAD = Number(process.env.MAX_DOWNLOAD_BYTES || 10 * 1024 * 1024 * 1024) // 10 GB (y nunca más que el espacio libre)
 export const TMP_DIR = path.join(process.cwd(), 'tmp-dl')
 
 export function getConfig() {
@@ -311,6 +311,11 @@ export async function downloadToFile(url, destPath, {
   const len = Number(res.headers.get('content-length') || 0)
   if (len && len > maxBytes) {
     throw new Error(`Archivo ~${mb(len)} MB supera el tope de descarga (${mb(maxBytes)} MB)`)
+  }
+  let free = Infinity
+  try { const st = fs.statfsSync(TMP_DIR); free = Number(st.bavail) * Number(st.bsize) } catch {}
+  if (len && len > free - 200 * 1024 * 1024) {
+    throw new Error(`No hay espacio: pesa ~${mb(len)} MB y quedan ${mb(free)} MB libres`)
   }
   const body = res.body
   if (!body) throw new Error('Sin body en la descarga')

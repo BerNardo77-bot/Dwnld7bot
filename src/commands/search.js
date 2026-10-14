@@ -2,6 +2,7 @@ import fetch from 'node-fetch'
 import { InputFile } from 'grammy'
 import { argText, getConfig, errText, isNsfwEnabled, sendLimit, downloadToFile, tmpPath, safeUnlink, mb } from '../api.js'
 import fs from 'fs'
+import { offerOversize } from '../oversize.js'
 import { chatOf } from '../store.js'
 import { buscarImagen } from '../imagenWeb.js'
 import { miniaturaYouTube, bajarImagen } from '../ytMiniatura.js'
@@ -382,11 +383,13 @@ export async function handleApk(ctx) {
         const sizeTxt = String(data.size || '')
         const num = parseFloat(sizeTxt.replace(/[^0-9.]/g, ''))
         const est = Number.isFinite(num) ? num * (/gb/i.test(sizeTxt) ? 1024 : /kb/i.test(sizeTxt) ? 1 / 1024 : 1) * 1024 * 1024 : 0
-        if (est > limit) {
-          await ctx.reply(`Ese APK pesa ~${mb(est)} MB y el tope de envío es ${mb(limit)} MB.\nCopia el link de arriba y descárgalo en el navegador.`)
-          return
-        }
         const fileName = `${String(data.name).replace(/[^\w.\- ]+/g, '').trim() || 'app'}.apk`
+        if (est > limit) {
+          return offerOversize(ctx, {
+            size: est, kind: 'document', fileName, caption: data.name, link: String(data.dl),
+            fetchFile: async (max) => { const f = tmpPath(`${Date.now()}-big.apk`); await downloadToFile(String(data.dl), f, { maxBytes: max }); return f }
+          })
+        }
         const out = tmpPath(`${Date.now()}-${fileName.replace(/\s+/g, '_')}`)
         const prog = await ctx.reply(`Descargando APK${est ? ` (~${mb(est)} MB)` : ''}...`)
         try {
