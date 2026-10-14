@@ -31,6 +31,7 @@ import { createPdfHandler, PDF_COMMANDS } from './commands/gdrive.js'
 import { createXHandler } from './commands/x.js'
 import { createPodcastHandlers } from './commands/podcast.js'
 import { createYtPicker } from './commands/ytpick.js'
+import { createNsfwPicker } from './commands/nsfwpick.js'
 import {
   handleDanbooru,
   handleGelbooru,
@@ -694,6 +695,8 @@ const handleX = createXHandler(sendOrCompress, { maxSend: MAX_SEND })
 
 createPodcastHandlers({ maxSend: MAX_SEND }).register(bot)
 ytPicker.register(bot)
+const nsfwPicker = createNsfwPicker({ sendOrCompress, maxSend: MAX_SEND })
+nsfwPicker.register(bot)
 bot.command(['start', 'help', 'menu'], handleHelp)
 bot.command(['ping', 'p'], handlePing)
 bot.command(['traducir', 'translate'], handleTranslate)
@@ -711,7 +714,9 @@ bot.on('message:photo', async (ctx, next) => {
 bot.command(['play', 'mp3', 'ytmp3', 'ytaudio', 'playaudio'], handlePlay)
 bot.command(['ytvideo', 'mp4', 'playvideo', 'play2', 'ytmp4'], handleVideo)
 bot.command(['ytvideohd', 'mp4hd', 'hdvideo', 'playvideohd'], handleVideoHd)
-bot.command(['xvideos', 'xv'], handleXvideos)
+// /xvideos: búsqueda/enlace de xvideos.com con lista; enlaces .mp4 de CDN siguen por el handler viejo
+const xvPick = nsfwPicker.handler('xvideos')
+bot.command(['xvideos', 'xv'], (ctx) => (/https?:\/\//i.test(argText(ctx)) && !/xvideos\d*\.com|xnxx\d*\.com/i.test(argText(ctx)) ? handleXvideos(ctx) : xvPick(ctx)))
 bot.command(['dl', 'get'], handleDl)
 
 bot.command(['tiktok', 'tt', 'tk', 'tiktokdl'], handleTiktok)
@@ -726,7 +731,7 @@ bot.command(['x', 'twitter', 'xdownloader', 'xdl', 'tw'], handleX)
 bot.command(['danbooru', 'dbooru'], handleDanbooru)
 bot.command(['gelbooru', 'gbooru'], handleGelbooru)
 bot.command(['r34', 'rule34', 'rule'], handleR34)
-bot.command(['xnxx'], handleXnxx)
+bot.command(['xnxx'], nsfwPicker.handler('xnxx'))
 bot.command(NSFW_INTERACTION_COMMANDS, handleNsfwInteraction)
 
 bot.command(['balance', 'bal'], handleBalance)
@@ -837,7 +842,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.1.0 arrancando...')
+console.log('Dwnld7bot v1.2.0 arrancando...')
 
 async function goOnline() {
   try {
