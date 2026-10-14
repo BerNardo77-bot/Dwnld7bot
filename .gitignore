@@ -1,0 +1,6 @@
+node_modules/
+.env
+tmp-dl/
+*.log
+data/store.json
+data/.telegram-local-logout.json
