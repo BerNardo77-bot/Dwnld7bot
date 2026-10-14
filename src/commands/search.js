@@ -1,6 +1,7 @@
 import fetch from 'node-fetch'
 import { InputFile } from 'grammy'
-import { argText, getConfig, errText, isNsfwEnabled } from '../api.js'
+import { argText, getConfig, errText, isNsfwEnabled, sendLimit, downloadToFile, tmpPath, safeUnlink, mb } from '../api.js'
+import fs from 'fs'
 import { chatOf } from '../store.js'
 import { buscarImagen } from '../imagenWeb.js'
 import { miniaturaYouTube, bajarImagen } from '../ytMiniatura.js'
@@ -333,7 +334,7 @@ export async function handleApk(ctx) {
         '/apk <nombre> — busca en Aptoide\n' +
         'Ejemplo: /apk WhatsApp\n\n' +
         'Si ya tienes el link .apk, abrelo en el navegador.\n' +
-        'Telegram no sube APKs de mas de ~50 MB.'
+        `Tope de envío ahora: ${mb(sendLimit())} MB (más grande → solo link).`
     )
   }
 
@@ -344,7 +345,7 @@ export async function handleApk(ctx) {
       `Link APK detectado\n\n` +
         `Archivo: ${nameGuess}\n` +
         `URL: ${q}\n\n` +
-        `Telegram cloud max ~50 MB: no puedo subir APKs grandes por aqui.\n` +
+        `Tope de envío: ${mb(sendLimit())} MB.\n` +
         `Abre el link en el navegador o un gestor de descargas.\n\n` +
         `Para buscar por nombre: /apk WhatsApp`
     )
@@ -377,23 +378,29 @@ export async function handleApk(ctx) {
 
         await ctx.api.editMessageText(ctx.chat.id, status.message_id, info)
 
-        const sizeMb = parseFloat(String(data.size || '').replace(/[^0-9.]/g, ''))
-        const tooBig = Number.isFinite(sizeMb) && sizeMb > 45
-        if (tooBig) {
-          await ctx.reply(
-            'Ese APK pesa mas de 45 MB: Telegram no lo puede subir.\n' +
-              'Copia el link de arriba y descargalo en el navegador.'
-          )
+        const limit = sendLimit()
+        const sizeTxt = String(data.size || '')
+        const num = parseFloat(sizeTxt.replace(/[^0-9.]/g, ''))
+        const est = Number.isFinite(num) ? num * (/gb/i.test(sizeTxt) ? 1024 : /kb/i.test(sizeTxt) ? 1 / 1024 : 1) * 1024 * 1024 : 0
+        if (est > limit) {
+          await ctx.reply(`Ese APK pesa ~${mb(est)} MB y el tope de envío es ${mb(limit)} MB.\nCopia el link de arriba y descárgalo en el navegador.`)
           return
         }
+        const fileName = `${String(data.name).replace(/[^\w.\- ]+/g, '').trim() || 'app'}.apk`
+        const out = tmpPath(`${Date.now()}-${fileName.replace(/\s+/g, '_')}`)
+        const prog = await ctx.reply(`Descargando APK${est ? ` (~${mb(est)} MB)` : ''}...`)
         try {
-          await ctx.replyWithDocument(String(data.dl), {
-            caption: `${data.name}.apk`,
-            filename: `${String(data.name).replace(/[^\w.\- ]+/g, '')}.apk`
-          })
+          await downloadToFile(String(data.dl), out, { maxBytes: limit })
+          const size = fs.statSync(out).size
+          if (size > limit) throw new Error(`pesa ${mb(size)} MB (tope ${mb(limit)} MB)`)
+          await ctx.api.editMessageText(ctx.chat.id, prog.message_id, `Subiendo APK (${mb(size)} MB)...`).catch(() => {})
+          await ctx.replyWithDocument(new InputFile(out, fileName), { caption: `${data.name}.apk · ${mb(size)} MB` })
+          await ctx.api.deleteMessage(ctx.chat.id, prog.message_id).catch(() => {})
         } catch (e) {
-          console.error('[apk] document', e?.message || e)
-          await ctx.reply('No pude enviar el APK por Telegram (limite ~50 MB). Usa el link de arriba.')
+          console.error('[apk] document', errText(e))
+          await ctx.api.editMessageText(ctx.chat.id, prog.message_id, `No pude enviar el APK (${errText(e).slice(0, 150)}). Usa el link de arriba.`).catch(() => {})
+        } finally {
+          safeUnlink(out)
         }
         return
       } catch (e) {

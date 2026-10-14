@@ -1,3 +1,4 @@
+import { setSendLimit } from './api.js'
 import { findTiktokUrls } from './tt-url.js'
 import 'dotenv/config'
 import fs from 'fs'
@@ -129,6 +130,7 @@ function configuredMaxSend() {
 const MAX_SEND = useLocalApi
   ? Math.min(configuredMaxSend() || LOCAL_MAX_SEND, 2000 * 1024 * 1024)
   : Math.min(configuredMaxSend() || CLOUD_MAX_SEND, CLOUD_MAX_SEND)
+setSendLimit(MAX_SEND)
 
 // Subidas grandes (hasta ~2 GB) necesitan mas tiempo que el default de grammy.
 const botOpts = useLocalApi
@@ -842,7 +844,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.2.0 arrancando...')
+console.log('Dwnld7bot v1.2.1 arrancando...')
 
 async function goOnline() {
   try {

@@ -1205,3 +1205,8 @@ export function argText(ctx) {
   const cut = raw.split(/\s+\//)[0].trim()
   return cut || raw
 }
+
+// Tope de envío a Telegram (lo fija index.js: ~1950 MB con Bot API local, 49 MB en la nube)
+let SEND_LIMIT = 49 * 1024 * 1024
+export function setSendLimit(n) { if (Number(n) > 0) SEND_LIMIT = Number(n) }
+export function sendLimit() { return SEND_LIMIT }

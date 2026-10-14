@@ -8,10 +8,10 @@ function uptimeStr() {
   return [h, m, s].map((v) => String(v).padStart(2, '0')).join(':')
 }
 
-export const helpText = `⚓ Dwnld7bot v1.2.0
+export const helpText = `⚓ Dwnld7bot v1.2.1
 
 Descargas a disco hasta ~2GB.
-Todas en alta calidad. Si pesa >50MB, comprime para Telegram.
+Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con servidor local), comprime o manda link.
 
 📥 Descargas (HD)
 /play /mp3 — audio YouTube
@@ -25,7 +25,7 @@ Todas en alta calidad. Si pesa >50MB, comprime para Telegram.
 /x /twitter /xdl /tw /xdownloader — X/Twitter video e imágenes
 /spotify /sp — Spotify
 /mediafire /mf — MediaFire
-/pdf /gdrive /drive /gd — Google Drive público, link directo a PDF o página web → PDF (>49 MB solo link)
+/pdf /gdrive /drive /gd — Google Drive público, link directo a PDF o página web → PDF (más que el tope de envío → solo link)
 /dl /get — link directo .mp4/.mp3
 /xvideos /xv — XVideos HD
 /xnxx — XNXX HD
@@ -98,7 +98,7 @@ Todas en alta calidad. Si pesa >50MB, comprime para Telegram.
 /pin /pinterest — Pinterest (tema o link)
 /ytsearch /search /yts — YouTube
 /ttsearch /tiktoksearch /tts — TikTok
-/apk /aptoide /apkdl — busca APK por nombre (no por link; >50MB solo link)
+/apk /aptoide /apkdl — busca APK por nombre (no por link; más que el tope de envío → solo link)
 /ams /applemusicsearch — Apple Music / iTunes
 
 🎭 Anime (responde a alguien para apuntar)
