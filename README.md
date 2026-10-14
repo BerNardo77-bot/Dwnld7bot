@@ -37,3 +37,15 @@ git pull
 npm install --omit=optional
 npm start
 ```
+
+## Modo 2 GB (servidor local de Bot API)
+
+Sin esto Telegram solo deja enviar ~50 MB. Con el servidor local en el mismo teléfono: hasta ~2 GB.
+
+1. Entra a https://my.telegram.org → *API development tools* y copia `api_id` y `api_hash` (no los pegues en ningún chat).
+2. `nano .env` y llena `TELEGRAM_API_ID=` y `TELEGRAM_API_HASH=`.
+3. Una sola vez: `npm run install-botapi` (paquete ya compilado de Termux, 1-3 min).
+4. Arranca con `npm run start2gb`.
+
+La primera vez el bot hace `logOut` en la API oficial (Telegram lo exige para moverlo al servidor local). Si después vuelves a `npm start` (50 MB), Telegram puede tardar ~10 min en aceptarlo.
+Logs del servidor: `~/.tgbotapi/server.log`.

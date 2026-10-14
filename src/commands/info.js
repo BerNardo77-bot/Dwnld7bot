@@ -8,7 +8,7 @@ function uptimeStr() {
   return [h, m, s].map((v) => String(v).padStart(2, '0')).join(':')
 }
 
-export const helpText = `⚓ Dwnld7bot v1.0.0
+export const helpText = `⚓ Dwnld7bot v1.1.0
 
 Descargas a disco hasta ~2GB.
 Todas en alta calidad. Si pesa >50MB, comprime para Telegram.
