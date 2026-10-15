@@ -5,7 +5,7 @@ import { liveTarget, tiktokTarget, liveInfo, recordLive, vlcSteps, ipNote, MAX_L
 import { makeThumb } from '../audio-tags.js'
 import { errText, sendLimit } from '../api.js'
 
-export const ENVIVO_COMMANDS = ['envivo', 'live', 'ytlive']
+export const ENVIVO_COMMANDS = ['envivo', 'envivos', 'live', 'ytlive']
 const lastLive = new Map()
 const jobs = new Set()
 const short = (s = '', n = 200) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s }
@@ -43,7 +43,7 @@ export async function handleEnvivo(ctx) {
   const st = await ctx.reply('📡 Buscando el en vivo…').catch(() => null)
   const say = (t) => st ? ctx.api.editMessageText(ctx.chat.id, st.message_id, t).catch(() => ctx.reply(t)) : ctx.reply(t)
   const info = await liveInfo(url)
-  if (info.status === 'nouser') return say('Ese usuario de TikTok no existe. Revisa cómo se escribe.')
+  if (info.status === 'nouser') return say(info.suggest ? `No encontré a @${info.user}. ¿Quisiste decir @${info.suggest.user}?${info.suggest.live ? ' (está en vivo ahora 🔴)' : ''}\nPrueba: envivo tt @${info.suggest.user}` : 'No encontré ese usuario de TikTok. Revisa el usuario (el que va después de @ en el perfil, puede llevar punto o guion bajo).')
   if (info.status === 'blocked') return say(info.reason)
   if (info.tiktok && info.status === 'notlive') return say('Ese usuario de TikTok no está en vivo ahora (o el usuario no existe). Cuando empiece su live, vuelve a intentarlo.')
   if (info.status === 'upcoming') return say(`🗓 Ese en vivo todavía no empieza${info.title ? `: ${info.title}` : ''}. Vuelve a intentarlo cuando comience.`)
