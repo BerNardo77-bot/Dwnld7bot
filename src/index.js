@@ -33,6 +33,7 @@ import { createPdfHandler, PDF_COMMANDS } from './commands/gdrive.js'
 import { createXHandler } from './commands/x.js'
 import { createPodcastHandlers } from './commands/podcast.js'
 import { createYtPicker } from './commands/ytpick.js'
+import { handleApple, registerMusic, setVideoHandler, playAudio, APPLE_COMMANDS } from './commands/music.js'
 import { createNsfwPicker } from './commands/nsfwpick.js'
 import {
   handleDanbooru,
@@ -309,47 +310,8 @@ async function sendOrCompress(ctx, filePath, { kind, fileName, caption, statusId
 async function handlePlay(ctx) {
   const q = argText(ctx)
   if (!q) return ctx.reply('Uso: /play nombre o link de YouTube')
-  const status = await ctx.reply('Buscando audio...')
-  const out = tmpPath(`${Date.now()}-audio.mp3`)
-  try {
-    const video = await resolveYoutube(q)
-    if (!video) {
-      return ctx.api.editMessageText(ctx.chat.id, status.message_id, 'No encontre el video.')
-    }
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      status.message_id,
-      'Audio: ' + video.title + '\nObteniendo enlace...'
-    )
-    const got = await getAudioLink(video.url, video.title)
-    if (got.error || !got.dl) {
-      return ctx.api.editMessageText(
-        ctx.chat.id,
-        status.message_id,
-        'No pude bajar el audio.\n' + (got.error || '')
-      )
-    }
-    await ctx.api.editMessageText(ctx.chat.id, status.message_id, 'Descargando audio a disco...')
-    const size = await downloadToFile(got.dl, out)
-    if (size < 50 * 1024) {
-      return ctx.api.editMessageText(ctx.chat.id, status.message_id, 'El audio vino incompleto.')
-    }
-    const name = ((got.title || video.title).slice(0, 40) || 'audio') + '.mp3'
-    await sendOrCompress(ctx, out, {
-      kind: 'audio',
-      fileName: name,
-      caption: got.title || video.title,
-      statusId: status.message_id,
-      fallbackLink: got.dl
-    })
-  } catch (e) {
-    console.error(e)
-    await ctx.api
-      .editMessageText(ctx.chat.id, status.message_id, 'Error: ' + errText(e))
-      .catch(() => ctx.reply(errText(e)))
-  } finally {
-    safeUnlink(out)
-  }
+  // MP3 real verificado (192k, portada, etiquetas) con nombre "Artista - Título.mp3" (src/commands/music.js)
+  return playAudio(ctx, { query: q })
 }
 
 async function handleVideo(ctx, quality = 'hd', qPicked = '') {
@@ -670,6 +632,8 @@ const handleXnxx = createXnxxHandler(sendOrCompress)
 const handlePdf = createPdfHandler({ maxSend: MAX_SEND })
 const handleX = createXHandler(sendOrCompress, { maxSend: MAX_SEND })
 
+registerMusic(bot) // antes de los otros pickers: el número va a la lista más reciente
+setVideoHandler((ctx, url) => handleVideo(ctx, 'hd', url))
 createPodcastHandlers({ maxSend: MAX_SEND }).register(bot)
 ytPicker.register(bot)
 registerOversize(bot)
@@ -690,6 +654,7 @@ bot.on('message:photo', async (ctx, next) => {
 })
 
 bot.command(['play', 'mp3', 'ytmp3', 'ytaudio', 'playaudio'], handlePlay)
+bot.command(APPLE_COMMANDS, handleApple)
 bot.command(['ytvideo', 'mp4', 'playvideo', 'play2', 'ytmp4'], handleVideo)
 bot.command(['ytvideohd', 'mp4hd', 'hdvideo', 'playvideohd'], handleVideoHd)
 // /xvideos: búsqueda/enlace de xvideos.com con lista; enlaces .mp4 de CDN siguen por el handler viejo
@@ -820,7 +785,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.3.0 arrancando...')
+console.log('Dwnld7bot v1.4.0 arrancando...')
 
 async function goOnline() {
   try {

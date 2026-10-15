@@ -100,6 +100,7 @@ Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con 
 /ttsearch /tiktoksearch /tts — TikTok
 /apk /aptoide /apkdl — busca APK por nombre (no por link; más que el tope de envío → solo link)
 /ams /applemusicsearch — Apple Music / iTunes
+/apple /am — Apple Music: link de canción → audio MP3, álbum → lista, o nombre / página web
 
 🎭 Anime (responde a alguien para apuntar)
 /hug /abrazo /kiss /muak /beso /pat /slap /dance /baile /cry

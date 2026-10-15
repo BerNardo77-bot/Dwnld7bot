@@ -193,6 +193,7 @@ async function enviarLista(ctx, titulo, items, art) {
   items = items.slice(0, MAX_EP)
   if (!items.length) return
   picks.set(pickKey(ctx), { items, until: Date.now() + PICK_MS })
+    ;(globalThis.__lastList || (globalThis.__lastList = new Map())).set(String(ctx.chat?.id), 'other')
   await ctx.reply(`🎙️ ${titulo}`).catch(() => {})
   const cache = new Map()
   const media = []
