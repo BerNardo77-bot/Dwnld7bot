@@ -34,6 +34,7 @@ import { createXHandler } from './commands/x.js'
 import { createPodcastHandlers } from './commands/podcast.js'
 import { createYtPicker } from './commands/ytpick.js'
 import { handleApple, registerMusic, setVideoHandler, playAudio, APPLE_COMMANDS } from './commands/music.js'
+import { handleRadio, registerRadio, RADIO_COMMANDS } from './commands/radio.js'
 import { createNsfwPicker } from './commands/nsfwpick.js'
 import {
   handleDanbooru,
@@ -633,6 +634,7 @@ const handlePdf = createPdfHandler({ maxSend: MAX_SEND })
 const handleX = createXHandler(sendOrCompress, { maxSend: MAX_SEND })
 
 registerMusic(bot) // antes de los otros pickers: el número va a la lista más reciente
+registerRadio(bot) // /radio: número/botón solo si la lista más reciente es de radio
 setVideoHandler((ctx, url) => handleVideo(ctx, 'hd', url))
 createPodcastHandlers({ maxSend: MAX_SEND }).register(bot)
 ytPicker.register(bot)
@@ -655,6 +657,7 @@ bot.on('message:photo', async (ctx, next) => {
 
 bot.command(['play', 'mp3', 'ytmp3', 'ytaudio', 'playaudio'], handlePlay)
 bot.command(APPLE_COMMANDS, handleApple)
+bot.command(RADIO_COMMANDS, handleRadio)
 bot.command(['ytvideo', 'mp4', 'playvideo', 'play2', 'ytmp4'], handleVideo)
 bot.command(['ytvideohd', 'mp4hd', 'hdvideo', 'playvideohd'], handleVideoHd)
 // /xvideos: búsqueda/enlace de xvideos.com con lista; enlaces .mp4 de CDN siguen por el handler viejo
@@ -785,7 +788,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.9 arrancando...')
+console.log('Dwnld7bot v1.4.10 arrancando...')
 
 async function goOnline() {
   try {
