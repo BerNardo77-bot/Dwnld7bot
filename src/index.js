@@ -37,6 +37,7 @@ import { handleApple, registerMusic, setVideoHandler, playAudio, APPLE_COMMANDS 
 import { handleRadio, registerRadio, RADIO_COMMANDS } from './commands/radio.js'
 import { handleSpace, SPACE_COMMANDS } from './commands/space.js'
 import { handleMapa, registerMapa, MAPA_COMMANDS } from './commands/mapa.js'
+import { handleEnvivo, registerEnvivo, ENVIVO_COMMANDS } from './commands/envivo.js'
 import { createNsfwPicker } from './commands/nsfwpick.js'
 import {
   handleDanbooru,
@@ -638,6 +639,7 @@ const handleX = createXHandler(sendOrCompress, { maxSend: MAX_SEND })
 registerMusic(bot) // antes de los otros pickers: el número va a la lista más reciente
 registerRadio(bot) // /radio: número/botón solo si la lista más reciente es de radio
 registerMapa(bot) // /mapa: número/botón solo si la lista más reciente es de mapa
+registerEnvivo(bot)
 setVideoHandler((ctx, url) => handleVideo(ctx, 'hd', url))
 createPodcastHandlers({ maxSend: MAX_SEND }).register(bot)
 ytPicker.register(bot)
@@ -663,6 +665,7 @@ bot.command(APPLE_COMMANDS, handleApple)
 bot.command(RADIO_COMMANDS, handleRadio)
 bot.command(SPACE_COMMANDS, handleSpace)
 bot.command(MAPA_COMMANDS, handleMapa)
+bot.command(ENVIVO_COMMANDS, handleEnvivo)
 bot.command(['ytvideo', 'mp4', 'playvideo', 'play2', 'ytmp4'], handleVideo)
 bot.command(['ytvideohd', 'mp4hd', 'hdvideo', 'playvideohd'], handleVideoHd)
 // /xvideos: búsqueda/enlace de xvideos.com con lista; enlaces .mp4 de CDN siguen por el handler viejo
@@ -793,7 +796,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.13 arrancando...')
+console.log('Dwnld7bot v1.4.14 arrancando...')
 
 async function goOnline() {
   try {
