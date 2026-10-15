@@ -58,6 +58,7 @@ export function createYtPicker({ onPick }) {
       return ctx.api.editMessageText(ctx.chat.id, status.message_id, t).catch(() => ctx.reply(t))
     }
     picks.set(String(ctx.chat.id), { items, quality, until: Date.now() + PICK_MS })
+    ;(globalThis.__lastList || (globalThis.__lastList = new Map())).set(String(ctx.chat?.id), 'other')
     const head = handle ? (words ? `@${handle} — ${items.length} videos para “${words}”` : `@${handle} — ${items.length} videos más nuevos`) : `${items.length} videos para “${words}”`
     await ctx.api.editMessageText(ctx.chat.id, status.message_id, '▶️ ' + head).catch(() => {})
     const caps = items.map((v, i) => `${i + 1}. ${v.title}`.slice(0, 300) + `\n${[fmtDur(v.seconds), v.channel, fmtViews(v.views)].filter(Boolean).join(' · ')}`)

@@ -386,6 +386,8 @@ export function queryText(ctx) {
     .trim()
 }
 
+import { rememberGoogle, musicFromUrl } from './music.js'
+
 const NO_PREVIEW = { link_preview_options: { is_disabled: true } }
 
 export async function handleGoogle(ctx) {
@@ -394,6 +396,10 @@ export async function handleGoogle(ctx) {
     return ctx.reply(
       'Uso: /google <texto>\nEjemplo: /google algebra de baldor\n\nTambién: /gg · /buscar · /googlesearch'
     )
+  }
+  // Link de música (Apple Music, Spotify, Genius, Deezer, YouTube Music) → directo a la canción/álbum
+  if (/^https?:\/\/\S+$/.test(q)) {
+    try { if (await musicFromUrl(ctx, q)) return } catch (e) { console.error('[google] musica', e?.message || e) }
   }
   const status = await ctx.reply('🔎 Buscando en la web...').catch(() => null)
   const say = async (text, extra = {}) => {
@@ -413,7 +419,8 @@ export async function handleGoogle(ctx) {
           'Los buscadores no respondieron o están bloqueando la consulta. Intenta de nuevo en unos minutos o con otras palabras.'
       )
     }
-    return say(formatResults(q, source, results), NO_PREVIEW)
+    const kb = rememberGoogle(ctx, results)
+    return say(formatResults(q, source, results) + (kb.reply_markup ? '\n\n✎ Toca un número: canción/álbum → audio, YouTube → video, otra página → música o video de YouTube · vale 5 min' : ''), { ...NO_PREVIEW, ...kb })
   } catch (e) {
     console.error('[google]', e)
     return say(`Error al buscar: ${e?.message || e}`)

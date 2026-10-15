@@ -127,6 +127,7 @@ export function createNsfwPicker({ sendOrCompress, maxSend }) {
     }
     if (!items.length) return ctx.api.editMessageText(ctx.chat.id, status.message_id, `No encontré videos para “${q}”.`).catch(() => {})
     picks.set(String(ctx.chat.id), { site, items, until: Date.now() + PICK_MS })
+    ;(globalThis.__lastList || (globalThis.__lastList = new Map())).set(String(ctx.chat?.id), 'other')
     await ctx.api.editMessageText(ctx.chat.id, status.message_id, `🔞 ${items.length} resultados en ${site} para “${q}”`).catch(() => {})
     const caps = items.map((v, i) => `${i + 1}. ${v.title}`.slice(0, 300) + (v.duration ? `\n${v.duration}` : '') + `\n${v.url}`)
     const withThumb = items.every((v) => v.thumb)
