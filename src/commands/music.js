@@ -7,7 +7,7 @@ import { promisify } from 'util'
 import yts from 'yt-search'
 import { InputFile } from 'grammy'
 import { musicKind, resolveTrack, resolveAlbum, searchQuery, searchItunes, pageMusicQuery, strongAlbum } from '../music-page.js'
-import { prepareAudio, fetchCover, makeThumb, probeAudio, haveFfmpeg } from '../audio-tags.js'
+import { youtubeCover, prepareAudio, fetchCover, makeThumb, probeAudio, haveFfmpeg } from '../audio-tags.js'
 import { resolveYoutube, getAudioLink, downloadToFile, tmpPath, safeUnlink, errText, resolveYtDlpBin, ytCookiesFile, extractYoutubeId, sendLimit } from '../api.js'
 
 const run = promisify(execFile)
@@ -71,7 +71,7 @@ export async function playAudio(ctx, { query = '', url = '', meta = null, quiet 
     if (src) console.log(`[music] fuente: ${src.codec} ${Math.round(src.duration)}s ${Math.round(src.bitrate / 1000)}kbps ${(buf.length / 1048576).toFixed(1)} MB`)
     const title = meta?.title || video.title
     const artist = meta?.artist || video.author?.name || ''
-    const coverBuf = (meta?.cover && await fetchCover(meta.cover)) || await fetchCover(video.thumbnail || video.image || `https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg`)
+    const coverBuf = (await youtubeCover(video.videoId || extractYoutubeId(video.url))) || (meta?.cover && await fetchCover(meta.cover)) || await fetchCover(video.thumbnail || video.image || `https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg`)
     const prep = await prepareAudio(buf, { title, artist, album: meta?.album || '', cover: coverBuf })
     const fin = await probeAudio(prep.buffer)
     console.log(`[music] enviando: ${prep.ext} codec=${fin?.codec || '?'} ${fin ? Math.round(fin.duration) + 's' : ''} ${(prep.buffer.length / 1048576).toFixed(1)} MB ${prep.tagged ? 'con portada' : 'sin portada'}`)
