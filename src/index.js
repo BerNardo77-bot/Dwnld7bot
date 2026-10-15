@@ -35,6 +35,7 @@ import { createPodcastHandlers } from './commands/podcast.js'
 import { createYtPicker } from './commands/ytpick.js'
 import { handleApple, registerMusic, setVideoHandler, playAudio, APPLE_COMMANDS } from './commands/music.js'
 import { handleRadio, registerRadio, RADIO_COMMANDS } from './commands/radio.js'
+import { handleSpace, SPACE_COMMANDS } from './commands/space.js'
 import { createNsfwPicker } from './commands/nsfwpick.js'
 import {
   handleDanbooru,
@@ -658,6 +659,7 @@ bot.on('message:photo', async (ctx, next) => {
 bot.command(['play', 'mp3', 'ytmp3', 'ytaudio', 'playaudio'], handlePlay)
 bot.command(APPLE_COMMANDS, handleApple)
 bot.command(RADIO_COMMANDS, handleRadio)
+bot.command(SPACE_COMMANDS, handleSpace)
 bot.command(['ytvideo', 'mp4', 'playvideo', 'play2', 'ytmp4'], handleVideo)
 bot.command(['ytvideohd', 'mp4hd', 'hdvideo', 'playvideohd'], handleVideoHd)
 // /xvideos: búsqueda/enlace de xvideos.com con lista; enlaces .mp4 de CDN siguen por el handler viejo
@@ -788,7 +790,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.11 arrancando...')
+console.log('Dwnld7bot v1.4.12 arrancando...')
 
 async function goOnline() {
   try {
