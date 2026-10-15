@@ -102,6 +102,7 @@ Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con 
 /ams /applemusicsearch — Apple Music / iTunes
 /apple /am — Apple Music: link de canción → audio MP3, álbum → lista, o nombre / página web
 /radio /fm — radios en vivo (Radio Browser): busca por nombre, país o ciudad y graba un fragmento MP3 (60 s; "2 10" = 10 min, máx. 30)
+/space — grabación de un Space de X (link x.com/i/spaces/…) en MP3; en partes si es muy largo
 
 🎭 Anime (responde a alguien para apuntar)
 /hug /abrazo /kiss /muak /beso /pat /slap /dance /baile /cry
