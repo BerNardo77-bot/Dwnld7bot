@@ -45,9 +45,9 @@ async function ytdlpAudio(url) {
  * Baja el audio (API → si falla o viene roto, yt-dlp), lo convierte a MP3 verificado con portada/etiquetas
  * y lo manda con sendAudio (título, intérprete, miniatura, nombre "Artista - Título.mp3").
  */
-export async function playAudio(ctx, { query = '', url = '', meta = null } = {}) {
-  const status = await ctx.reply('🎵 Buscando audio...').catch(() => null)
-  const say = (t) => status ? ctx.api.editMessageText(ctx.chat.id, status.message_id, t).catch(() => {}) : ctx.reply(t).catch(() => {})
+export async function playAudio(ctx, { query = '', url = '', meta = null, quiet = false } = {}) {
+  const status = quiet ? null : await ctx.reply('🎵 Buscando audio...').catch(() => null)
+  const say = (t) => quiet ? (console.error('[music] (todas)', String(t).slice(0, 150)), false) : status ? ctx.api.editMessageText(ctx.chat.id, status.message_id, t).catch(() => {}) : ctx.reply(t).catch(() => {})
   const out = tmpPath(`${Date.now()}-api-audio`)
   try {
     const video = await resolveYoutube(url || query)
@@ -85,9 +85,11 @@ export async function playAudio(ctx, { query = '', url = '', meta = null } = {})
       caption: meta?.album ? `💿 ${meta.album}` : undefined
     })
     if (status) await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => {})
+    return true
   } catch (e) {
     console.error('[music]', e)
     await say('Error: ' + errText(e))
+    return false
   } finally {
     safeUnlink(out)
   }
@@ -107,10 +109,11 @@ async function sendLong(ctx, head, lines, foot, extra = {}) {
     await ctx.reply((i === 0 ? head : '') + parts[i].join('\n') + (last ? foot : ''), last ? extra : {}).catch((e) => console.error('[music] lista', errText(e)))
   }
 }
-const buttons = (n, prefix) => {
+const buttons = (n, prefix, withAll = false) => {
   const rows = []
   const max = Math.min(n, 20)
   for (let s = 0; s < max; s += 5) rows.push(Array.from({ length: Math.min(5, max - s) }, (_, j) => ({ text: String(s + j + 1), callback_data: `${prefix}:${s + j + 1}` })))
+  if (withAll) rows.push([{ text: '⬇️ Todas', callback_data: `${prefix}:all` }])
   return rows.length ? { reply_markup: { inline_keyboard: rows } } : {}
 }
 
@@ -122,7 +125,7 @@ async function showAlbum(ctx, al, image) {
   if (cover) await ctx.replyWithPhoto(cover, { caption: `💿 ${al.album || 'Álbum'}${al.artist ? `\n👤 ${al.artist}` : ''}\n${items.length} canciones` }).catch(() => {})
   const lines = items.map((t, i) => `${i + 1}. ${t.title}${t.artist && t.artist !== al.artist ? ` — ${t.artist}` : ''}`)
   const head = cover ? '' : `💿 ${al.album || 'Álbum'}${al.artist ? `\n👤 ${al.artist}` : ''}\n\n`
-  await sendLong(ctx, head, lines, `\n\n✎ Toca un botón o responde con el número (1-${items.length}) y te mando el audio · vale 5 min${al.fromYt ? '\n(lista sacada de YouTube)' : ''}`, buttons(items.length, 'mus'))
+  await sendLong(ctx, head, lines, `\n\n✎ Toca un botón o responde con el número (1-${items.length}) y te mando el audio, o responde todas (botón ⬇️ Todas) para bajar el álbum completo · vale 5 min${al.fromYt ? '\n(lista sacada de YouTube)' : ''}`, buttons(items.length, 'mus', true))
 }
 
 /** Página de música (canción → audio; álbum → lista). true si era de música. */
@@ -162,7 +165,7 @@ export async function searchMusic(ctx, q, { strict = false } = {}) {
   markList(ctx.chat.id, 'music')
   if (items[0]?.image) await ctx.replyWithPhoto(items[0].image, { caption: `🍎 Apple Music: ${short(q, 150)}` }).catch(() => {})
   const lines = items.map((t, i) => `${i + 1}. ${t.type === 'album' ? '💿' : '🎵'} ${t.title} — ${t.artist}`)
-  await sendLong(ctx, items[0]?.image ? '' : `🍎 Apple Music: ${short(q, 150)}\n\n`, lines, `\n\n✎ Toca un botón o responde con el número (vale 5 min): 🎵 audio, 💿 canciones del álbum.`, buttons(items.length, 'mus'))
+  await sendLong(ctx, items[0]?.image ? '' : `🍎 Apple Music: ${short(q, 150)}\n\n`, lines, `\n\n✎ Toca un botón o responde con el número (vale 5 min): 🎵 audio, 💿 canciones del álbum; todas (⬇️) baja todas las 🎵.`, buttons(items.length, 'mus', items.some(t => !t.albumUrl)))
   return true
 }
 
@@ -220,7 +223,49 @@ async function pick(ctx, n, kind = null) {
   return true
 }
 
+const MAX_ALL = 100
+const albumJobs = new Set()
+async function downloadAll(ctx) {
+  const k = String(ctx.chat?.id)
+  if (albumJobs.has(k)) { await ctx.reply('Ya estoy bajando un álbum en este chat. Espera a que termine.'); return true }
+  const hit = lists.get(k)
+  if (!hit || hit.until < Date.now() || hit.kind !== 'album') { lists.delete(k); return false }
+  let songs = hit.items.filter(t => !t.albumUrl)
+  if (!songs.length) { await ctx.reply('Esa lista solo tiene álbumes. Elige uno por número.'); return true }
+  const total0 = songs.length
+  if (songs.length > MAX_ALL) songs = songs.slice(0, MAX_ALL)
+  albumJobs.add(k)
+  lists.delete(k)
+  const failed = []
+  try {
+    const st = await ctx.reply(`⬇️ Álbum completo: ${songs.length} canciones${total0 > MAX_ALL ? ` (de ${total0}; máximo ${MAX_ALL})` : ''}. Bajando 1/${songs.length}...`).catch(() => null)
+    for (let i = 0; i < songs.length; i++) {
+      const t = songs[i]
+      if (st && i > 0) await ctx.api.editMessageText(ctx.chat.id, st.message_id, `⬇️ Álbum completo: bajando ${i + 1}/${songs.length}...`).catch(() => {})
+      let ok = false
+      try { ok = await playAudio(ctx, { quiet: true, ...(t.url ? { url: t.url } : { query: searchQuery(t), meta: { title: t.title, artist: t.artist, album: t.album || '', cover: t.image || '' } }) }) } catch (e) { console.error('[music] todas', errText(e)) }
+      if (!ok) failed.push(`${i + 1}. ${t.title}`)
+      await new Promise(r => setTimeout(r, 1500))
+    }
+    const done = `✅ Álbum listo: ${songs.length - failed.length}/${songs.length} canciones enviadas.${failed.length ? `\nNo se pudieron bajar:\n${failed.join('\n')}` : ''}`
+    if (st) await ctx.api.editMessageText(ctx.chat.id, st.message_id, done.slice(0, 4000)).catch(() => ctx.reply(done.slice(0, 4000)))
+    else await ctx.reply(done.slice(0, 4000))
+  } finally {
+    albumJobs.delete(k)
+  }
+  return true
+}
+
 export function registerMusic(bot) {
+  bot.callbackQuery(/^mus:all$/, async (ctx) => {
+    await ctx.answerCallbackQuery().catch(() => {})
+    try { if (!(await downloadAll(ctx))) await ctx.reply('Esa lista ya venció (5 min). Búscala otra vez.') } catch (e) { await ctx.reply('Error: ' + errText(e)).catch(() => {}) }
+  })
+  bot.hears(/^\s*(todas|todo|all|0)\s*[.!]?\s*$/i, async (ctx, next) => {
+    const k = String(ctx.chat?.id)
+    if (!albumJobs.has(k) && (lastList.get(k) !== 'music' || !lists.has(k))) return next()
+    try { if (!(await downloadAll(ctx))) return next() } catch (e) { await ctx.reply('Error: ' + errText(e)).catch(() => {}) }
+  })
   for (const [re, kind] of [[/^mus:(\d+)$/, 'album'], [/^gpk:(\d+)$/, 'google']]) {
     bot.callbackQuery(re, async (ctx) => {
       await ctx.answerCallbackQuery().catch(() => {})
