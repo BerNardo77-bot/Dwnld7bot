@@ -6,7 +6,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import yts from 'yt-search'
 import { InputFile } from 'grammy'
-import { musicKind, resolveTrack, resolveAlbum, searchQuery, searchItunes, pageMusicQuery, strongAlbum } from '../music-page.js'
+import { musicKind, resolveTrack, resolveAlbum, searchQuery, searchItunes, pageMusicQuery, strongAlbum, betterTitle } from '../music-page.js'
 import { youtubeCover, prepareAudio, fetchCover, makeThumb, probeAudio, haveFfmpeg } from '../audio-tags.js'
 import { resolveYoutube, getAudioLink, downloadToFile, tmpPath, safeUnlink, errText, resolveYtDlpBin, ytCookiesFile, extractYoutubeId, sendLimit } from '../api.js'
 
@@ -69,7 +69,8 @@ export async function playAudio(ctx, { query = '', url = '', meta = null, quiet 
       else return say(`No pude bajar el audio.${apiErr ? `\n${apiErr.slice(0, 200)}` : ''}`)
     }
     if (src) console.log(`[music] fuente: ${src.codec} ${Math.round(src.duration)}s ${Math.round(src.bitrate / 1000)}kbps ${(buf.length / 1048576).toFixed(1)} MB`)
-    const title = meta?.title || video.title
+    const title = meta?.title ? betterTitle(meta.title, video.title, meta.artist) : video.title
+    if (meta?.title && title !== meta.title) console.log(`[titulo] "${meta.title}" → "${title}"`)
     const artist = meta?.artist || video.author?.name || ''
     const coverBuf = (await youtubeCover(video.videoId || extractYoutubeId(video.url))) || (meta?.cover && await fetchCover(meta.cover)) || await fetchCover(video.thumbnail || video.image || `https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg`)
     const prep = await prepareAudio(buf, { title, artist, album: meta?.album || '', cover: coverBuf })
