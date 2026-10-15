@@ -1,4 +1,4 @@
-// /radio <nombre, país o ciudad> → lista con botones; toca o responde N (60 s) o "N 5" (5 min). /radio <link> [min]. "rec 10" regraba la última.
+// /radio <nombre, país o ciudad> → lista con botones; toca o responde N (info + menú) o "N 5" (5 min). /radio <link> [min]. "rec 10" regraba la última.
 import fs from 'fs'
 import { InputFile } from 'grammy'
 import { searchStations, recordStation, stationLine, stationInfo, faviconCover, parseMinutes, isStreamUrl, stationFromUrl, countClick, DEFAULT_REC_SEC, MAX_REC_MIN } from '../radio-core.js'
@@ -18,6 +18,17 @@ const durKeyboard = () => ({ reply_markup: { inline_keyboard: [DURS.map(m => ({ 
 const short = (s = '', n = 200) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s }
 const argText = (ctx) => String(ctx.message?.text || '').replace(/^\/\S+\s*/, '').trim()
 
+/** Elegir estación: info + link En vivo y botones de duración (ya no graba solo). */
+async function ofrecer(ctx, st) {
+  lastStation.set(String(ctx.chat.id), { st, until: Date.now() + 30 * 60 * 1000 })
+  countClick(st.uuid)
+  const fav = await faviconCover(st.favicon).catch(() => null)
+  const info = stationInfo(st)
+  if (fav) await ctx.replyWithPhoto(new InputFile(fav, 'radio.jpg'), { caption: short(info, 1000) }).catch(() => ctx.reply(info, { link_preview_options: { is_disabled: true } }))
+  else await ctx.reply(info, { link_preview_options: { is_disabled: true } }).catch(() => {})
+  await ctx.reply(`⏺ ¿Grabar ${short(st.name, 60)} en MP3? Elige duración (o escribe "rec N", 1-${MAX_REC_MIN}):`, durKeyboard()).catch(() => {})
+}
+
 async function grabar(ctx, st, seconds) {
   const key = String(ctx.chat.id)
   if (jobs.has(key)) return ctx.reply('Ya estoy grabando una radio en este chat. Espera a que termine.')
@@ -25,12 +36,10 @@ async function grabar(ctx, st, seconds) {
   lastStation.set(key, { st, until: Date.now() + 30 * 60 * 1000 })
   let rec = null
   try {
-    countClick(st.uuid)
-    const fav = await faviconCover(st.favicon)
+        const fav = await faviconCover(st.favicon)
     const min = Math.round(seconds / 60)
-    const info = `${stationInfo(st)}\n\n⏺ Grabando ${seconds >= 60 ? min + ' min' : seconds + ' s'}…${seconds >= 300 ? ' te aviso al terminar.' : ''}\n✎ Para más tiempo usa los botones de abajo (5/10/15/30 min) o escribe "rec 30".`
-    if (fav) await ctx.replyWithPhoto(new InputFile(fav, 'radio.jpg'), { caption: short(info, 1000) }).catch(() => ctx.reply(info))
-    else await ctx.reply(info, { link_preview_options: { is_disabled: true } })
+    void fav
+    await ctx.reply(`⏺ Grabando ${short(st.name, 60)} · ${seconds >= 60 ? min + ' min' : seconds + ' s'}…${seconds >= 300 ? ' te aviso al terminar.' : ''}`).catch(() => {})
     // Progreso (mensaje editado cada minuto) en grabaciones largas
     const t0 = Date.now()
     const prog = seconds >= 180 ? await ctx.reply(`⏺ ${short(st.name, 60)}: 0/${min} min…`).catch(() => null) : null
@@ -62,11 +71,11 @@ function keyboard(n) {
 
 export async function handleRadio(ctx) {
   const q = argText(ctx)
-  if (!q) return ctx.reply(`📻 Uso:\n/radio <nombre, país o ciudad> → lista de estaciones\n/radio <link del stream> [minutos] → graba directo\nToca un botón o responde el número (graba ${DEFAULT_REC_SEC} s), o "número minutos" (ej. 2 10), máx. ${MAX_REC_MIN} min.\n"rec 5" vuelve a grabar la última estación 5 min.\nEjemplo: /radio Exa · /radio Mexico`)
+  if (!q) return ctx.reply(`📻 Uso:\n/radio <nombre, país o ciudad> → lista de estaciones\n/radio <link del stream> [minutos] → link y opciones (con minutos graba directo)\nToca un botón o responde el número (te doy el link y 5/10/15/30 min), o "número minutos" (ej. 2 10), máx. ${MAX_REC_MIN} min.\n"rec 5" vuelve a grabar la última estación 5 min.\nEjemplo: /radio Exa · /radio Mexico`)
   const url = (q.match(/https?:\/\/\S+/) || [])[0]
   if (url && isStreamUrl(url)) {
     const min = parseMinutes(q.replace(url, ''))
-    return grabar(ctx, stationFromUrl(url), min ? min * 60 : DEFAULT_REC_SEC)
+    return min ? grabar(ctx, stationFromUrl(url), min * 60) : ofrecer(ctx, stationFromUrl(url))
   }
   let list
   try { list = await searchStations(q, LIST_MAX) } catch (e) { return ctx.reply('Radio Browser no responde ahora. ' + short(errText(e), 120)) }
@@ -80,7 +89,7 @@ export async function handleRadio(ctx) {
   else if (media.length === 1) await ctx.replyWithPhoto(media[0].media, { caption: media[0].caption }).catch(() => {})
   const lines = list.map((s, i) => short(stationLine(s, i), 180))
   const head = `📻 Radios › ${q}\n\n`
-  const foot = `\n\n✎ Toca un botón o responde el número (1-${list.length}) y grabo ${DEFAULT_REC_SEC} s.\n${HINT} · vale 10 min`
+  const foot = `\n\n✎ Toca un botón o responde el número (1-${list.length}) y te doy el link y opciones para grabar.\n${HINT} · vale 10 min`
   const parts = []; let cur = [], len = head.length
   for (const l of lines) { if (cur.length >= 60 || len + l.length > 3700) { parts.push(cur); cur = []; len = 0 } cur.push(l); len += l.length + 1 }
   parts.push(cur)
@@ -95,7 +104,7 @@ function pick(ctx, n, min = 0) {
   const l = lists.get(k)
   if (!l || Date.now() > l.until) return false
   if (n < 1 || n > l.items.length) { ctx.reply(`Elige un número del 1 al ${l.items.length}.`).catch(() => {}); return true }
-  grabar(ctx, l.items[n - 1], min ? Math.min(min, MAX_REC_MIN) * 60 : DEFAULT_REC_SEC).catch(() => {})
+  ;(min ? grabar(ctx, l.items[n - 1], Math.min(min, MAX_REC_MIN) * 60) : ofrecer(ctx, l.items[n - 1])).catch(() => {})
   return true
 }
 
