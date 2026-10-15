@@ -1,7 +1,7 @@
 // /envivo <link o @canal> → link directo (VLC) + botones para grabar 5/10/15/30 min en MP3
 import fs from 'fs'
 import { InputFile } from 'grammy'
-import { liveTarget, liveInfo, recordLive, vlcSteps, ipNote, MAX_LIVE_MIN } from '../live-core.js'
+import { liveTarget, tiktokTarget, liveInfo, recordLive, vlcSteps, ipNote, MAX_LIVE_MIN } from '../live-core.js'
 import { makeThumb } from '../audio-tags.js'
 import { errText, sendLimit } from '../api.js'
 
@@ -37,24 +37,28 @@ async function grabar(ctx, url, min) {
 
 export async function handleEnvivo(ctx) {
   const q = String(ctx.message?.text || '').replace(/^\/\S+\s*/, '').trim()
-  const url = liveTarget(q)
-  if (!url) return ctx.reply(`📡 Uso: /envivo <link de YouTube o @canal>\nEjemplos: /envivo @MILENIO · /envivo @LofiGirl\nTe doy el link para verlo en VLC. Agrega minutos para grabar el audio: /envivo @MILENIO 10 (máx. ${MAX_LIVE_MIN}).`)
+  const url = (await tiktokTarget(q)) || liveTarget(q)
+  if (!url) return ctx.reply(`📡 Uso: /envivo <link de YouTube o @canal>\nEjemplos: /envivo @MILENIO · /envivo @LofiGirl (YouTube)\nTikTok: /envivo tiktok @usuario o el link de TikTok\nTe doy el link para verlo en VLC. Agrega minutos para grabar el audio: /envivo @MILENIO 10 (máx. ${MAX_LIVE_MIN}).`)
   const min = Number((q.match(/\s(\d{1,3})\s*(m|min|minutos?)?\s*$/i) || [])[1]) || 0
   const st = await ctx.reply('📡 Buscando el en vivo…').catch(() => null)
   const say = (t) => st ? ctx.api.editMessageText(ctx.chat.id, st.message_id, t).catch(() => ctx.reply(t)) : ctx.reply(t)
   const info = await liveInfo(url)
+  if (info.status === 'nouser') return say('Ese usuario de TikTok no existe. Revisa cómo se escribe.')
+  if (info.status === 'blocked') return say(info.reason)
+  if (info.tiktok && info.status === 'notlive') return say('Ese usuario de TikTok no está en vivo ahora (o el usuario no existe). Cuando empiece su live, vuelve a intentarlo.')
   if (info.status === 'upcoming') return say(`🗓 Ese en vivo todavía no empieza${info.title ? `: ${info.title}` : ''}. Vuelve a intentarlo cuando comience.`)
   if (info.status === 'ended') return say(`⏹ Ese en vivo ya terminó${info.title ? `: ${info.title}` : ''}. Si quieres el video, usa /play o /ytvideo con el link.`)
-  if (info.status === 'notlive') return say(`Ese ${info.title ? 'video' : 'canal'} ${info.title ? `no es un en vivo: ${info.title}` : 'no está transmitiendo en vivo ahora (o el canal no existe).'}`)
+  if (info.status === 'notlive') return say(`Ese canal no está transmitiendo en vivo ahora (o el canal no existe).${info.title ? `\n${info.title}` : ''}`)
   if (info.status !== 'live') return say('No pude revisar el en vivo. ' + (info.reason || ''))
   if (st) ctx.api.deleteMessage(ctx.chat.id, st.message_id).catch(() => {})
   if (min) return grabar(ctx, url, Math.min(min, MAX_LIVE_MIN))
   lastLive.set(String(ctx.chat.id), { url, until: Date.now() + 30 * 60 * 1000 })
-  const cap = `🔴 EN VIVO\n📺 ${short(info.title, 300)}${info.channel ? `\n👤 ${info.channel}` : ''}\n\n${vlcSteps()}\n${ipNote(info)}\n\nAbajo te mando los links (cópialos completos).`
+  const cap = `🔴 EN VIVO${info.tiktok ? ' · TikTok' : ''}\n📺 ${short(info.title, 300)}${info.channel ? `\n👤 ${info.channel}` : ''}\n\n${vlcSteps()}\n${ipNote(info)}\n\nAbajo te mando los links (cópialos completos).`
   if (info.thumb) await ctx.replyWithPhoto(info.thumb, { caption: short(cap, 1020) }).catch(() => ctx.reply(cap))
   else await ctx.reply(cap)
   const np = { link_preview_options: { is_disabled: true } }
   if (info.master) await ctx.reply(`🎬 Video + audio (VLC):\n${info.master}`, np).catch(() => {})
+  if (info.alt) await ctx.reply(`🎬 Otra versión (HLS, puede fallar):\n${info.alt}`, np).catch(() => {})
   if (info.audio) await ctx.reply(`🎧 Solo audio:\n${info.audio}`, np).catch(() => {})
   await ctx.reply('⏺ ¿Grabar el audio en MP3?', { reply_markup: { inline_keyboard: [[5, 10, 15, 30].map(m => ({ text: `⏺ ${m} min`, callback_data: `liv:${m}` }))] } })
 }
