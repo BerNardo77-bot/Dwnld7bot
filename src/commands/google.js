@@ -387,6 +387,8 @@ export function queryText(ctx) {
 }
 
 import { rememberGoogle, musicFromUrl } from './music.js'
+import { InputFile } from 'grammy'
+import { bajarImagen } from '../ytMiniatura.js'
 
 const NO_PREVIEW = { link_preview_options: { is_disabled: true } }
 
@@ -420,7 +422,24 @@ export async function handleGoogle(ctx) {
       )
     }
     const kb = rememberGoogle(ctx, results)
-    return say(formatResults(q, source, results) + (kb.reply_markup ? '\n\n✎ Toca un número: canción/álbum → audio, YouTube → video, otra página → música o video de YouTube · vale 5 min' : ''), { ...NO_PREVIEW, ...kb })
+    const foot = '✎ Toca un número: canción/álbum → audio, YouTube → video, otra página → música o video de YouTube · vale 5 min'
+    // Miniaturas en paralelo (≤4 s cada una); si ninguna sale, lista de texto como antes
+    const imgs = await Promise.all(results.map((r) => thumbFor(r.url).catch(() => null)))
+    const withImg = results.map((r, i) => ({ r, i, img: imgs[i] })).filter((x) => x.img)
+    if (!withImg.length) return say(formatResults(q, source, results) + (kb.reply_markup ? '\n\n' + foot : ''), { ...NO_PREVIEW, ...kb })
+    await say(`🔎 Búsqueda web: ${short(q, 120)} · ${results.length} resultados · Fuente: ${source}`)
+    const cap = (r, i) => (`${i + 1}. ${short(r.title, 120)}\n` + (r.snippet ? `${short(r.snippet, 300)}\n` : '') + `🔗 ${r.url}`).slice(0, 1000)
+    let sent = false
+    try {
+      if (withImg.length === 1) await ctx.replyWithPhoto(new InputFile(withImg[0].img.buffer, 'thumb.jpg'), { caption: cap(withImg[0].r, withImg[0].i) })
+      else await ctx.replyWithMediaGroup(withImg.slice(0, 10).map((x) => ({ type: 'photo', media: new InputFile(x.img.buffer, `t${x.i}.jpg`), caption: cap(x.r, x.i) })))
+      sent = true
+    } catch (e) {
+      console.error('[google] miniaturas', e?.message || e)
+    }
+    const rest = sent ? results.map((r, i) => ({ r, i })).filter((x) => !imgs[x.i] || withImg.findIndex((w) => w.i === x.i) >= 10) : results.map((r, i) => ({ r, i }))
+    const restText = rest.map((x) => cap(x.r, x.i)).join('\n\n')
+    return ctx.reply(((restText ? restText + '\n\n' : '') + (kb.reply_markup ? foot : '')).slice(0, 4000) || 'Elige un resultado.', { ...NO_PREVIEW, ...kb })
   } catch (e) {
     console.error('[google]', e)
     return say(`Error al buscar: ${e?.message || e}`)
@@ -428,3 +447,24 @@ export async function handleGoogle(ctx) {
 }
 
 export const GOOGLE_COMMANDS = ['google', 'gg', 'buscar', 'googlesearch']
+
+// Miniatura de un resultado: YouTube → i.ytimg; Apple → artwork; otra página → og:image / twitter:image (≤4 s)
+const ytId = (u) => (String(u).match(/(?:youtu\.be\/|[?&]v=|shorts\/)([\w-]{11})/) || [])[1]
+async function thumbFor(url) {
+  const id = ytId(url)
+  if (id) return bajarImagen(`https://i.ytimg.com/vi/${id}/hqdefault.jpg`, { timeout: 4000 })
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36', Accept: 'text/html' }, signal: AbortSignal.timeout(4000), redirect: 'follow' })
+  if (!res.ok || !/html/i.test(res.headers.get('content-type') || '')) return null
+  let html = ''
+  const reader = res.body
+  for await (const chunk of reader) { html += chunk.toString('utf8'); if (html.length > 300000 || /<\/head>/i.test(html)) break }
+  try { reader.destroy?.() } catch {}
+  const m = html.match(/<meta[^>]+(?:property|name)=["'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["'][^>]*content=["']([^"']+)["']/i) ||
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image|twitter:image)["']/i) ||
+    html.match(/<link[^>]+rel=["']image_src["'][^>]*href=["']([^"']+)["']/i)
+  if (!m) return null
+  let img = m[1].replace(/&amp;/g, '&')
+  try { img = new URL(img, url).href } catch { return null }
+  img = img.replace(/\/\d+x\d+bb\./, '/600x600bb.')
+  return bajarImagen(img, { timeout: 4000 })
+}
