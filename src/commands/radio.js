@@ -12,6 +12,9 @@ const LIST_MAX = 50
 const lists = new Map() // chat → { items, until }
 const jobs = new Set()
 const lastStation = new Map()
+const DURS = [5, 10, 15, 30]
+const HINT = `Responde "2 10" para grabar 10 min (máx. ${MAX_REC_MIN})`
+const durKeyboard = () => ({ reply_markup: { inline_keyboard: [DURS.map(m => ({ text: `⏺ ${m} min`, callback_data: `radd:${m}` }))] } })
 const short = (s = '', n = 200) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s }
 const argText = (ctx) => String(ctx.message?.text || '').replace(/^\/\S+\s*/, '').trim()
 
@@ -24,17 +27,23 @@ async function grabar(ctx, st, seconds) {
   try {
     countClick(st.uuid)
     const fav = await faviconCover(st.favicon)
-    const info = `${stationInfo(st)}\n\n⏺ Grabando ${seconds >= 60 ? Math.round(seconds / 60) + ' min' : seconds + ' s'}…`
+    const min = Math.round(seconds / 60)
+    const info = `${stationInfo(st)}\n\n⏺ Grabando ${seconds >= 60 ? min + ' min' : seconds + ' s'}…${seconds >= 300 ? ' te aviso al terminar.' : ''}\n✎ Para más tiempo usa los botones de abajo (5/10/15/30 min) o escribe "rec 30".`
     if (fav) await ctx.replyWithPhoto(new InputFile(fav, 'radio.jpg'), { caption: short(info, 1000) }).catch(() => ctx.reply(info))
     else await ctx.reply(info, { link_preview_options: { is_disabled: true } })
-    rec = await recordStation(st, seconds, { maxBytes: sendLimit() - 512 * 1024 })
+    // Progreso (mensaje editado cada minuto) en grabaciones largas
+    const t0 = Date.now()
+    const prog = seconds >= 180 ? await ctx.reply(`⏺ ${short(st.name, 60)}: 0/${min} min…`).catch(() => null) : null
+    const tick = prog ? setInterval(() => { ctx.api.editMessageText(ctx.chat.id, prog.message_id, `⏺ ${short(st.name, 60)}: ${Math.min(min, Math.floor((Date.now() - t0) / 60000))}/${min} min…`).catch(() => {}) }, 60000) : null
+    try { rec = await recordStation(st, seconds, { maxBytes: sendLimit() - 512 * 1024 }) } finally { if (tick) clearInterval(tick); if (prog) ctx.api.deleteMessage(ctx.chat.id, prog.message_id).catch(() => {}) }
     console.log(`[radio] ${st.name} ${rec.seconds}s ${(rec.size / 1048576).toFixed(1)} MB ${rec.url}`)
     const thumb = rec.cover ? await makeThumb(rec.cover, 320).catch(() => null) : null
-    await ctx.replyWithAudio(new InputFile(fs.createReadStream(rec.file), rec.name), {
+    await ctx.replyWithAudio(new InputFile(rec.file, rec.name), {
       title: short(`${st.name} (en vivo)`, 64), performer: short(st.country || 'Radio', 64), duration: rec.seconds,
       ...(thumb ? { thumbnail: new InputFile(thumb, 'cover.jpg') } : {}),
       caption: `📻 ${short(st.name, 200)} · ${Math.floor(rec.seconds / 60)}:${String(rec.seconds % 60).padStart(2, '0')}`
     })
+    await ctx.reply(`⏺ ¿Grabar más de ${short(st.name, 60)}? Elige duración (o escribe "rec N", 1-${MAX_REC_MIN}):`, durKeyboard()).catch(() => {})
   } catch (e) {
     console.error('[radio]', errText(e))
     await ctx.reply(`${short(errText(e), 250)}\nPrueba otra estación.`).catch(() => {})
@@ -71,7 +80,7 @@ export async function handleRadio(ctx) {
   else if (media.length === 1) await ctx.replyWithPhoto(media[0].media, { caption: media[0].caption }).catch(() => {})
   const lines = list.map((s, i) => short(stationLine(s, i), 180))
   const head = `📻 Radios › ${q}\n\n`
-  const foot = `\n\n✎ Toca un botón o responde el número (1-${list.length}) y grabo ${DEFAULT_REC_SEC} s; "número minutos" (ej. 1 5) hasta ${MAX_REC_MIN} min · vale 10 min`
+  const foot = `\n\n✎ Toca un botón o responde el número (1-${list.length}) y grabo ${DEFAULT_REC_SEC} s.\n${HINT} · vale 10 min`
   const parts = []; let cur = [], len = head.length
   for (const l of lines) { if (cur.length >= 60 || len + l.length > 3700) { parts.push(cur); cur = []; len = 0 } cur.push(l); len += l.length + 1 }
   parts.push(cur)
@@ -91,6 +100,12 @@ function pick(ctx, n, min = 0) {
 }
 
 export function registerRadio(bot) {
+  bot.callbackQuery(/^radd:(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery().catch(() => {})
+    const ls = lastStation.get(String(ctx.chat?.id))
+    if (!ls || Date.now() > ls.until) return ctx.reply('Ya venció (30 min). Elige la estación otra vez con /radio.').catch(() => {})
+    grabar(ctx, ls.st, Math.max(1, Math.min(Number(ctx.match[1]), MAX_REC_MIN)) * 60).catch(() => {})
+  })
   bot.callbackQuery(/^rad:(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery().catch(() => {})
     if (!pick(ctx, Number(ctx.match[1]))) await ctx.reply('Esa lista ya venció (10 min). Búscala otra vez con /radio.').catch(() => {})
