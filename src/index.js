@@ -1,3 +1,4 @@
+import { splitVideo, cleanParts, partsFor } from './video-split.js'
 import { setSendLimit } from './api.js'
 import { offerOversize, registerOversize } from './oversize.js'
 import { findTiktokUrls } from './tt-url.js'
@@ -282,11 +283,29 @@ bot.on('message:text', async (ctx, next) => {
 })
 
 
+const TG_MAX_PARTS = Number(process.env.TG_MAX_PARTS) || 8
 async function sendOrCompress(ctx, filePath, { kind, fileName, caption, statusId, fallbackLink }) {
   let pathToSend = filePath
   let size = fs.statSync(pathToSend).size
   let compressedPath = null
 
+  if (size > MAX_SEND && kind === 'video' && partsFor(size, MAX_SEND) <= TG_MAX_PARTS) {
+    // Video más grande que el límite de Telegram: partes por tiempo (ffmpeg -c copy), misma calidad
+    let parts = null
+    try {
+      if (statusId) await ctx.api.editMessageText(ctx.chat.id, statusId, `Pesa ${mb(size)} MB (límite ${mb(MAX_SEND)} MB). Lo parto en ${partsFor(size, MAX_SEND)} partes, sin bajar la calidad…`).catch(() => {})
+      parts = await splitVideo(filePath, MAX_SEND, { title: String(fileName || 'video').replace(/\.mp4$/i, ''), maxParts: TG_MAX_PARTS + 2, deleteSource: false })
+      for (const p of parts) {
+        const inp = new InputFile(p.file, p.name)
+        const cap = `${caption || ''}\n📦 Parte ${p.index} de ${p.total}`.trim()
+        try { await ctx.replyWithVideo(inp, { caption: cap, supports_streaming: true }) } catch { await ctx.replyWithDocument(new InputFile(p.file, p.name), { caption: cap }) }
+      }
+      if (statusId) await ctx.api.deleteMessage(ctx.chat.id, statusId).catch(() => {})
+      return true
+    } catch (e) {
+      console.error('[split]', errText(e))
+    } finally { cleanParts(parts) }
+  }
   if (size > MAX_SEND) {
     return offerOversize(ctx, {
       file: filePath, kind, fileName, caption, statusId, link: fallbackLink || '',
@@ -796,7 +815,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.17 arrancando...')
+console.log('Dwnld7bot v1.4.18 arrancando...')
 
 async function goOnline() {
   try {
