@@ -1,4 +1,4 @@
-import { splitVideo, cleanParts, partsFor } from './video-split.js'
+import { splitVideo, cleanParts, partsFor, maxPartsFor, bigWarning } from './video-split.js'
 import { setSendLimit } from './api.js'
 import { offerOversize, registerOversize } from './oversize.js'
 import { findTiktokUrls } from './tt-url.js'
@@ -283,7 +283,7 @@ bot.on('message:text', async (ctx, next) => {
 })
 
 
-const TG_MAX_PARTS = Number(process.env.TG_MAX_PARTS) || 8
+const TG_MAX_PARTS = Number(process.env.TG_MAX_PARTS) || maxPartsFor(MAX_SEND) // ≈ MAX_TOTAL_GB (40) / límite por archivo
 async function sendOrCompress(ctx, filePath, { kind, fileName, caption, statusId, fallbackLink }) {
   let pathToSend = filePath
   let size = fs.statSync(pathToSend).size
@@ -294,7 +294,9 @@ async function sendOrCompress(ctx, filePath, { kind, fileName, caption, statusId
     let parts = null
     try {
       if (statusId) await ctx.api.editMessageText(ctx.chat.id, statusId, `Pesa ${mb(size)} MB (límite ${mb(MAX_SEND)} MB). Lo parto en ${partsFor(size, MAX_SEND)} partes, sin bajar la calidad…`).catch(() => {})
-      parts = await splitVideo(filePath, MAX_SEND, { title: String(fileName || 'video').replace(/\.mp4$/i, ''), maxParts: TG_MAX_PARTS + 2, deleteSource: false })
+      parts = await splitVideo(filePath, MAX_SEND, { title: String(fileName || 'video').replace(/\.mp4$/i, ''), maxParts: TG_MAX_PARTS + 3, deleteSource: false })
+      const warn = bigWarning(size, parts.length)
+      if (warn) await ctx.reply(warn).catch(() => {})
       for (const p of parts) {
         const inp = new InputFile(p.file, p.name)
         const cap = `${caption || ''}\n📦 Parte ${p.index} de ${p.total}`.trim()
@@ -815,7 +817,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.18 arrancando...')
+console.log('Dwnld7bot v1.4.19 arrancando...')
 
 async function goOnline() {
   try {
