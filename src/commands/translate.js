@@ -90,7 +90,8 @@ export async function handleTranslate(ctx) {
     console.log(`[traducir] ${res.source}→${res.target} ${Math.round(res.seconds)}s`)
   } catch (e) {
     console.error('[traducir]', e?.message || e)
-    await edit(vtErrorText(e) + '\n\nTip: si el idioma salió mal, dile cuál es, por ejemplo: /traducir pt>es')
+    const et = vtErrorText(e)
+    await edit(et.startsWith('🎙️') ? et : et + '\n\nTip: si el idioma salió mal, dile cuál es, por ejemplo: /traducir es>en o /traducir pt>es')
   } finally {
     vtCleanup(res?.dir)
     vtCleanup(dir)
