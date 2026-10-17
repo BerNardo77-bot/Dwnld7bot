@@ -155,34 +155,80 @@ export async function resolveApiRoot(token) {
 
 // Descarga el archivo de un getFile a Buffer. Soporta:
 // - file_path relativo (API oficial o local sin --local): {root}/file/bot{token}/{path}
-// - file_path absoluto (--local): lee del disco si existe; si no, TELEGRAM_API_FILES_URL.
+// - file_path absoluto (--local): el archivo vive en el disco del servidor Bot API, que normalmente es
+//   otro contenedor. Se intenta, en orden:
+//   1) leerlo del disco (si bot y servidor comparten disco, p. ej. Termux en el mismo teléfono)
+//   2) TELEGRAM_API_FILES_URL (si existe)
+//   3) el servidor de archivos del propio servidor local en la red privada (puerto 8090 de
+//      local-bot-api/start.sh), deducido de TELEGRAM_API_ROOT, sin variables nuevas
+//   4) el endpoint /file/ del servidor local
+//   No se usa api.telegram.org en modo local: pedirle getFile a la nube volvería a "loguear" el bot
+//   allá y el servidor local podría dejar de recibir mensajes.
+function filesCandidates(fp, token) {
+  const prefix = String(process.env.TELEGRAM_API_FILES_PREFIX || '/var/lib/telegram-bot-api').replace(/\/+$/, '')
+  const rel = fp.startsWith(prefix + '/') ? fp.slice(prefix.length + 1) : fp.replace(/^\/+/, '')
+  const relEnc = rel.split('/').map(encodeURIComponent).join('/')
+  const bases = []
+  const add = (b) => { b = String(b || '').trim().replace(/\/+$/, ''); if (b && !bases.includes(b)) bases.push(b) }
+  add(process.env.TELEGRAM_API_FILES_URL)
+  const filesPort = String(process.env.TELEGRAM_FILES_PORT || '8090')
+  for (const raw of [state.requested, state.root]) {
+    try {
+      const u = new URL(String(raw || ''))
+      const h = u.hostname
+      if (/\.railway\.internal$/i.test(h) || /^(localhost|127\.|10\.|192\.168\.|\[?::1\]?$|\[?fd)/i.test(h)) add(`http://${u.host.replace(/:\d+$/, '')}:${filesPort}`)
+    } catch {}
+  }
+  if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) add(`http://telegram-bot-api.railway.internal:${filesPort}`)
+  const urls = bases.map((b) => `${b}/${relEnc}`)
+  const root = getActiveApiRoot()
+  if (root !== OFFICIAL_API_ROOT) {
+    urls.push(`${root}/file/bot${token}/${relEnc}`)
+    urls.push(`${root}/file/bot${token}${fp.split('/').map(encodeURIComponent).join('/')}`)
+  }
+  return urls
+}
+
+async function fetchBuf(url, timeoutMs, maxBytes) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const buf = Buffer.from(await res.arrayBuffer())
+  if (maxBytes && buf.length > maxBytes) throw new Error('Archivo demasiado grande')
+  // Una respuesta JSON de la Bot API ({"ok":false,…} o getMe) no es el archivo
+  if (/json/i.test(res.headers.get('content-type') || '') || /^\s*\{"ok":/.test(buf.subarray(0, 16).toString())) throw new Error('respuesta JSON, no archivo')
+  return buf
+}
+
+const safeUrl = (u) => String(u).replace(/\d{5,}(:|%3A)[\w-]{10,}/gi, '<token>')
+
 export async function downloadTelegramFile(file, token, { timeoutMs = 120000, maxBytes = 0 } = {}) {
   const fp = String(file?.file_path || '')
   if (!fp) throw new Error('Telegram no devolvio file_path')
 
-  let url
-  if (fp.startsWith('/')) {
+  if (!fp.startsWith('/')) {
     try {
-      fs.accessSync(fp, fs.constants.R_OK)
-      return fs.readFileSync(fp)
-    } catch {}
-    const filesUrl = String(process.env.TELEGRAM_API_FILES_URL || '').trim().replace(/\/+$/, '')
-    if (!filesUrl) {
-      throw new Error(
-        'El servidor Bot API local (--local) devolvio una ruta de disco que este bot no puede leer. ' +
-          'Configura TELEGRAM_API_FILES_URL o quita TELEGRAM_LOCAL=1 del servidor.'
-      )
+      return await fetchBuf(`${getActiveApiRoot()}/file/bot${token}/${fp}`, timeoutMs, maxBytes)
+    } catch (e) {
+      if (/demasiado grande/.test(e.message)) throw e
+      throw new Error(`Descarga de Telegram fallo (${e.message})`)
     }
-    const prefix = String(process.env.TELEGRAM_API_FILES_PREFIX || '/var/lib/telegram-bot-api').replace(/\/+$/, '')
-    const rel = fp.startsWith(prefix + '/') ? fp.slice(prefix.length + 1) : fp.replace(/^\/+/, '')
-    url = `${filesUrl}/${rel.split('/').map(encodeURIComponent).join('/')}`
-  } else {
-    url = `${getActiveApiRoot()}/file/bot${token}/${fp}`
   }
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
-  if (!res.ok) throw new Error(`Descarga de Telegram fallo (HTTP ${res.status})`)
-  const buf = Buffer.from(await res.arrayBuffer())
-  if (maxBytes && buf.length > maxBytes) throw new Error('Archivo demasiado grande')
-  return buf
+  try {
+    fs.accessSync(fp, fs.constants.R_OK)
+    return fs.readFileSync(fp)
+  } catch {}
+  const errs = []
+  for (const url of filesCandidates(fp, token)) {
+    try {
+      const buf = await fetchBuf(url, Math.min(timeoutMs, 60000), maxBytes)
+      if (buf.length) return buf
+      errs.push(`${safeUrl(url)} vacio`)
+    } catch (e) {
+      if (/demasiado grande/.test(e.message)) throw e
+      errs.push(`${safeUrl(url)} ${e?.cause?.code || e.message}`)
+    }
+  }
+  console.error('[getfile] no se pudo bajar el archivo del servidor local:', errs.join(' | '))
+  throw new Error('No pude bajar el archivo desde el servidor de Telegram del bot. Intenta otra vez en unos minutos.')
 }
