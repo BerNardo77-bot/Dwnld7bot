@@ -27,7 +27,7 @@ import {
 } from './api.js'
 import { handleSticker, handlePhotoCaption } from './commands/stickers.js'
 import { handleHelp, handlePing } from './commands/info.js'
-import { handleTranslate } from './commands/translate.js'
+import { handleTranslate, TRANSLATE_COMMANDS } from './commands/translate.js'
 import { createDownloadHandlers } from './commands/downloads.js'
 import { handleGoogle, GOOGLE_COMMANDS } from './commands/google.js'
 import { createPdfHandler, PDF_COMMANDS } from './commands/gdrive.js'
@@ -669,7 +669,7 @@ const nsfwPicker = createNsfwPicker({ sendOrCompress, maxSend: MAX_SEND })
 nsfwPicker.register(bot)
 bot.command(['start', 'help', 'menu'], handleHelp)
 bot.command(['ping', 'p'], handlePing)
-bot.command(['traducir', 'translate'], handleTranslate)
+bot.command(TRANSLATE_COMMANDS, handleTranslate) // texto o traducción por voz (responder a nota de voz/audio)
 bot.command(['sticker', 's'], handleSticker)
 bot.on('message:photo', async (ctx, next) => {
   const cap = String(ctx.message?.caption || '')
@@ -817,7 +817,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.19 arrancando...')
+console.log('Dwnld7bot v1.4.20 arrancando...')
 
 async function goOnline() {
   try {
