@@ -8,7 +8,7 @@ import path from 'path'
 import { InputFile } from 'grammy'
 import { translateText } from '../api.js'
 import { downloadTelegramFile } from '../tgapi.js'
-import { voiceTranslate, vtFormat, vtCleanup, vtErrorText, vtUsage, parseVoiceArgs, vtTranslate, vtLangName, vtLangList, VT_MAX_SEC } from '../voice-translate-core.js'
+import { vtPronounce, voiceTranslate, vtFormat, vtCleanup, vtErrorText, vtUsage, parseVoiceArgs, vtTranslate, vtLangName, vtLangList, VT_MAX_SEC } from '../voice-translate-core.js'
 
 export const TRANSLATE_COMMANDS = ['traducir', 'traduce', 'tr', 'translate', 'traductor']
 const jobs = new Map()
@@ -49,7 +49,8 @@ async function textMode(ctx, raw) {
       if (got.error || !got.text) throw e
       r = { text: got.text }
     }
-    await ctx.api.editMessageText(ctx.chat.id, status.message_id, `🌐 ${vtLangName(target)}:\n${r.text}`.slice(0, 4000))
+    const pron = await vtPronounce(r.text, target).catch(() => null)
+    await ctx.api.editMessageText(ctx.chat.id, status.message_id, (`🌐 ${vtLangName(target)}:\n${r.text}` + (pron ? `\n\n🗣️ Cómo se pronuncia:\n${pron}` : '')).slice(0, 4000))
   } catch (e) {
     await ctx.api.editMessageText(ctx.chat.id, status.message_id, vtErrorText(e)).catch(() => {})
   }
