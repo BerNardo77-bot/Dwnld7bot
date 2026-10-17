@@ -1,54 +1,100 @@
-import { translateText, argText, normalizeLang } from '../api.js'
+// /traducir /traduce /tr /translate
+// • Respondiendo a una nota de voz, audio o video (o mandándolo con el comando de pie de foto):
+//   lo pasa a texto, lo traduce y regresa texto + nota de voz de la traducción.
+// • Con texto (o respondiendo a un texto): traduce el texto.
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { InputFile } from 'grammy'
+import { translateText } from '../api.js'
+import { downloadTelegramFile } from '../tgapi.js'
+import { voiceTranslate, vtFormat, vtCleanup, vtErrorText, vtUsage, parseVoiceArgs, vtTranslate, vtLangName, vtLangList, VT_MAX_SEC } from '../voice-translate-core.js'
 
-export async function handleTranslate(ctx) {
-  const raw = argText(ctx)
-  if (!raw) {
-    return ctx.reply(
-      'Uso: /traducir <idioma> <texto>\nEjemplo: /traducir en Hola mundo\nIdioma por defecto: es (si solo mandas texto con reply, usa es).'
-    )
-  }
+export const TRANSLATE_COMMANDS = ['traducir', 'traduce', 'tr', 'translate', 'traductor']
+const jobs = new Map()
 
-  const parts = raw.split(/\s+/)
-  let language = 'es'
-  let text = raw
-  const first = parts[0] || ''
-  const plain = first.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  const known = new Set([
-    'es', 'espanol', 'spanish', 'castellano',
-    'en', 'ingles', 'english',
-    'pt', 'portugues', 'fr', 'frances',
-    'it', 'italiano', 'de', 'aleman',
-    'ja', 'japones', 'ko', 'coreano',
-    'zh', 'chino', 'ru', 'ruso', 'ar', 'arabe'
-  ])
-  if (parts.length >= 2 && (known.has(plain) || /^[a-z]{2}$/i.test(first))) {
-    language = normalizeLang(first)
-    text = parts.slice(1).join(' ')
-  }
+function mediaOf(m) {
+  if (!m) return null
+  const v = m.voice || m.audio || m.video_note || m.video || (/^(audio|video)\//.test(m.document?.mime_type || '') ? m.document : null)
+  if (!v?.file_id) return null
+  return { fileId: v.file_id, seconds: Number(v.duration || 0), size: Number(v.file_size || 0), mime: v.mime_type || (m.voice ? 'audio/ogg' : m.video_note ? 'video/mp4' : '') }
+}
 
-  // Si respondió a un mensaje y no hay texto extra, traducir el reply
-  if ((!text || text === language) && ctx.message?.reply_to_message?.text) {
-    text = ctx.message.reply_to_message.text
-    if (parts.length === 1 && /^[a-z]{2}/i.test(parts[0])) language = parts[0].toLowerCase()
-  }
+function argsOf(ctx) {
+  const raw = String(ctx.message?.text || ctx.message?.caption || '')
+  return raw.replace(/^\/\S+\s*/, '').trim()
+}
 
-  if (!text?.trim()) return ctx.reply('Falta el texto a traducir.')
-
+async function textMode(ctx, raw) {
+  const words = raw.split(/\s+/).filter(Boolean)
+  const first = parseVoiceArgs(words[0] || '')
+  let target = first.target
+  let text = target ? words.slice(1).join(' ') : words.join(' ')
+  const rt = ctx.message?.reply_to_message
+  if (!text && (rt?.text || rt?.caption)) text = rt.text || rt.caption
+  if (!text) return ctx.reply(vtUsage('/').replace(/\*/g, ''))
   const status = await ctx.reply('Traduciendo...')
   try {
-    const got = await translateText(text.trim(), language)
-    if (got.error || !got.text) {
-      return ctx.api.editMessageText(
-        ctx.chat.id,
-        status.message_id,
-        'No se pudo traducir.\n' + (got.error || '')
-      )
+    let r
+    try {
+      if (target) r = await vtTranslate(text, target)
+      else {
+        // Sin idioma: español → inglés, cualquier otro → español
+        r = await vtTranslate(text, 'es')
+        target = 'es'
+        if (String(r.src || '').startsWith('es')) { r = await vtTranslate(text, 'en', 'es'); target = 'en' }
+      }
+    } catch (e) {
+      const got = await translateText(text, target || 'es')
+      if (got.error || !got.text) throw e
+      r = { text: got.text }
     }
-    await ctx.api.editMessageText(ctx.chat.id, status.message_id, got.text)
+    await ctx.api.editMessageText(ctx.chat.id, status.message_id, `🌐 ${vtLangName(target)}:\n${r.text}`.slice(0, 4000))
   } catch (e) {
-    console.error('[translate]', e)
-    await ctx.api
-      .editMessageText(ctx.chat.id, status.message_id, 'Error: ' + e.message)
-      .catch(() => {})
+    await ctx.api.editMessageText(ctx.chat.id, status.message_id, vtErrorText(e)).catch(() => {})
+  }
+}
+
+export async function handleTranslate(ctx) {
+  const raw = argsOf(ctx)
+  const media = mediaOf(ctx.message) || mediaOf(ctx.message?.reply_to_message)
+  if (!media) return textMode(ctx, raw)
+
+  const opt = parseVoiceArgs(raw)
+  if (opt.unknown) return ctx.reply(`No conozco el idioma "${opt.unknown}".\nUsa uno de estos: ${vtLangList()}\nEjemplo: /traducir en`)
+
+  const key = String(ctx.chat.id)
+  if ((jobs.get(key) || 0) >= 2) return ctx.reply('Ya estoy traduciendo audios en este chat. Espera a que termine.')
+  jobs.set(key, (jobs.get(key) || 0) + 1)
+  const replyTo = { reply_parameters: { message_id: ctx.message.message_id, allow_sending_without_reply: true } }
+  const status = await ctx.reply(media.seconds > VT_MAX_SEC + 60
+    ? `🎙️ Escuchando el audio… dura ${Math.round(media.seconds / 60)} min, así que solo traduzco los primeros ${Math.round(VT_MAX_SEC / 60)}.`
+    : '🎙️ Escuchando el audio…', replyTo)
+  const edit = (t) => ctx.api.editMessageText(ctx.chat.id, status.message_id, t).catch(() => {})
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vtin-'))
+  let res = null
+  try {
+    let file
+    try { file = await ctx.api.getFile(media.fileId) } catch (e) {
+      if (/too big/i.test(String(e?.description || e?.message))) throw new Error('Ese archivo es muy pesado para bajarlo de Telegram (máx. 20 MB). Mándame un audio más corto o una nota de voz.')
+      throw e
+    }
+    const buf = await downloadTelegramFile(file, process.env.TELEGRAM_BOT_TOKEN, { timeoutMs: 180000 })
+    const ext = path.extname(String(file.file_path || '')).slice(0, 6) || '.ogg'
+    const input = path.join(dir, 'audio' + ext)
+    fs.writeFileSync(input, buf)
+    res = await voiceTranslate(input, { target: opt.target, source: opt.source, onStatus: edit })
+    await ctx.reply(vtFormat(res, { bold: (s) => s }), replyTo)
+    if (res.ogg) await ctx.replyWithVoice(new InputFile(res.ogg, 'traduccion.ogg'), { ...replyTo, caption: `🔊 ${vtLangName(res.target)}` })
+    await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => {})
+    console.log(`[traducir] ${res.source}→${res.target} ${Math.round(res.seconds)}s`)
+  } catch (e) {
+    console.error('[traducir]', e?.message || e)
+    await edit(vtErrorText(e) + '\n\nTip: si el idioma salió mal, dile cuál es, por ejemplo: /traducir pt>es')
+  } finally {
+    vtCleanup(res?.dir)
+    vtCleanup(dir)
+    const n = (jobs.get(key) || 1) - 1
+    if (n <= 0) jobs.delete(key); else jobs.set(key, n)
   }
 }
