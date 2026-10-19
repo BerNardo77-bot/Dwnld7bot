@@ -4,6 +4,8 @@
 // - Si el servidor local no responde, cae a la API oficial (tope 49 MB) sin crash-loop.
 // - Descarga archivos de getFile tanto en modo normal como --local (rutas absolutas).
 import fs from 'fs'
+import { Readable } from 'stream'
+import { pipeline } from 'stream/promises'
 import path from 'path'
 
 export const OFFICIAL_API_ROOT = 'https://api.telegram.org'
@@ -228,6 +230,53 @@ export async function downloadTelegramFile(file, token, { timeoutMs = 120000, ma
       if (/demasiado grande/.test(e.message)) throw e
       errs.push(`${safeUrl(url)} ${e?.cause?.code || e.message}`)
     }
+  }
+  console.error('[getfile] no se pudo bajar el archivo del servidor local:', errs.join(' | '))
+  throw new Error('No pude bajar el archivo desde el servidor de Telegram del bot. Intenta otra vez en unos minutos.')
+}
+
+// Igual que downloadTelegramFile pero guarda directo en un archivo, sin cargarlo todo en memoria
+// (para audios largos). Devuelve el tamaño en bytes.
+async function fetchTo(url, dest, timeoutMs) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  if (/json/i.test(res.headers.get('content-type') || '')) throw new Error('respuesta JSON, no archivo')
+  if (!res.body) throw new Error('sin contenido')
+  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(dest))
+  const size = fs.statSync(dest).size
+  const head = Buffer.alloc(16)
+  const fd = fs.openSync(dest, 'r')
+  try { fs.readSync(fd, head, 0, 16, 0) } finally { fs.closeSync(fd) }
+  if (/^\s*\{"ok":/.test(head.toString())) throw new Error('respuesta JSON, no archivo')
+  return size
+}
+
+export async function downloadTelegramFileTo(file, token, dest, { timeoutMs = 30 * 60000 } = {}) {
+  const fp = String(file?.file_path || '')
+  if (!fp) throw new Error('Telegram no devolvio file_path')
+  if (!fp.startsWith('/')) {
+    try {
+      return await fetchTo(`${getActiveApiRoot()}/file/bot${token}/${fp}`, dest, timeoutMs)
+    } catch (e) {
+      fs.rmSync(dest, { force: true })
+      throw new Error(`Descarga de Telegram fallo (${safeUrl(e.message)})`)
+    }
+  }
+  try {
+    fs.accessSync(fp, fs.constants.R_OK)
+    await fs.promises.copyFile(fp, dest)
+    return fs.statSync(dest).size
+  } catch {}
+  const errs = []
+  for (const url of filesCandidates(fp, token)) {
+    try {
+      const size = await fetchTo(url, dest, timeoutMs)
+      if (size) return size
+      errs.push(`${safeUrl(url)} vacio`)
+    } catch (e) {
+      errs.push(`${safeUrl(url)} ${e?.cause?.code || e.message}`)
+    }
+    fs.rmSync(dest, { force: true })
   }
   console.error('[getfile] no se pudo bajar el archivo del servidor local:', errs.join(' | '))
   throw new Error('No pude bajar el archivo desde el servidor de Telegram del bot. Intenta otra vez en unos minutos.')

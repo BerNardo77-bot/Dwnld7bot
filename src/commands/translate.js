@@ -8,9 +8,9 @@ import os from 'os'
 import path from 'path'
 import { InputFile } from 'grammy'
 import { translateText } from '../api.js'
-import { downloadTelegramFile } from '../tgapi.js'
+import { downloadTelegramFileTo } from '../tgapi.js'
 import { imageTranslate } from '../ocr-core.js'
-import { vtPronounce, voiceTranslate, vtFormat, vtCleanup, vtErrorText, vtUsage, parseVoiceArgs, vtTranslate, vtLangName, vtLangList, VT_MAX_SEC } from '../voice-translate-core.js'
+import { vtPronounce, voiceTranslate, vtMessages, vtCleanup, vtHms, vtEstimate, vtErrorText, vtUsage, parseVoiceArgs, vtTranslate, vtLangName, vtLangList, VT_MAX_SEC } from '../voice-translate-core.js'
 
 export const TRANSLATE_COMMANDS = ['traducir', 'traduce', 'tr', 'translate', 'traductor']
 const jobs = new Map()
@@ -77,26 +77,41 @@ export async function handleTranslate(ctx) {
   if ((jobs.get(key) || 0) >= 2) return ctx.reply('Ya estoy traduciendo en este chat. Espera a que termine.')
   jobs.set(key, (jobs.get(key) || 0) + 1)
   const replyTo = { reply_parameters: { message_id: ctx.message.message_id, allow_sending_without_reply: true } }
-  const status = await ctx.reply(media.image ? '🖼️ Leyendo el texto de la imagen…' : media.seconds > VT_MAX_SEC + 60
-    ? `🎙️ Escuchando el audio… dura ${Math.round(media.seconds / 60)} min, así que solo traduzco los primeros ${Math.round(VT_MAX_SEC / 60)}.`
-    : '🎙️ Escuchando el audio…', replyTo)
-  const edit = (t) => ctx.api.editMessageText(ctx.chat.id, status.message_id, t).catch(() => {})
+  const long = !media.image && media.seconds > 120
+  const intro = media.image ? '🖼️ Leyendo el texto de la imagen…'
+    : long ? `🎙️ Escuchando el audio (${vtHms(media.seconds)})… Tardo más o menos ${vtEstimate(media.seconds)} min; aquí te voy marcando el avance.`
+      + (media.seconds > VT_MAX_SEC + 60 ? `\n⚠️ Solo traduzco las primeras ${Math.round(VT_MAX_SEC / 3600)} horas.` : '')
+      : '🎙️ Escuchando el audio…'
+  const status = await ctx.reply(intro, replyTo)
+  // Editar el mismo mensaje con el avance (máx. cada 15 s para no chocar con los límites de Telegram)
+  let lastEdit = 0, lastText = ''
+  const edit = (t, force = true) => {
+    if (t === lastText) return
+    if (!force && Date.now() - lastEdit < 15000) return
+    lastEdit = Date.now(); lastText = t
+    const shown = long && /%/.test(t) ? `${intro.split('\n')[0]}\n\n${t}` : t
+    return ctx.api.editMessageText(ctx.chat.id, status.message_id, shown).catch(() => {})
+  }
+  const onStatus = (t) => edit(t, !/\d+%/.test(t))
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vtin-'))
   let res = null
   try {
     let file
     try { file = await ctx.api.getFile(media.fileId) } catch (e) {
-      if (/too big/i.test(String(e?.description || e?.message))) throw new Error(media.image ? 'Esa imagen es muy pesada para bajarla de Telegram (máx. 20 MB). Mándala como foto (no como archivo).' : 'Ese archivo es muy pesado para bajarlo de Telegram (máx. 20 MB). Mándame un audio más corto o una nota de voz.')
+      if (/too big/i.test(String(e?.description || e?.message))) throw new Error(media.image ? '🖼️ Esa imagen es muy pesada para bajarla de Telegram (máx. 20 MB). Mándala como foto (no como archivo).' : '🎙️ Ese archivo pesa más de 20 MB y Telegram no me deja bajarlo. Mándalo como nota de voz o en un formato más ligero (una nota de voz de 20 MB dura más o menos 1 a 2 horas), o pártelo en pedazos.')
       throw e
     }
-    const buf = await downloadTelegramFile(file, process.env.TELEGRAM_BOT_TOKEN, { timeoutMs: 180000 })
     const ext = path.extname(String(file.file_path || '')).slice(0, 6) || (media.image ? '.jpg' : '.ogg')
     const input = path.join(dir, (media.image ? 'imagen' : 'audio') + ext)
-    fs.writeFileSync(input, buf)
+    const size = await downloadTelegramFileTo(file, process.env.TELEGRAM_BOT_TOKEN, input, { timeoutMs: 30 * 60000 })
+    if (!size) throw new Error(media.image ? 'No pude descargar la imagen. Mándala otra vez.' : 'No pude descargar el audio. Mándalo otra vez.')
     res = media.image
-      ? await imageTranslate(input, { target: opt.target, source: opt.source, onStatus: edit })
-      : await voiceTranslate(input, { target: opt.target, source: opt.source, onStatus: edit })
-    await ctx.reply(vtFormat(res, { bold: (s) => s }), replyTo)
+      ? await imageTranslate(input, { target: opt.target, source: opt.source, onStatus })
+      : await voiceTranslate(input, { target: opt.target, source: opt.source, onStatus })
+    fs.rmSync(input, { force: true })
+    const out = vtMessages(res, { bold: (s) => s, maxLen: 3900 })
+    for (const text of out.messages) await ctx.reply(text, replyTo)
+    if (out.file) await ctx.replyWithDocument(new InputFile(Buffer.from(out.file.content, 'utf8'), out.file.name), { ...replyTo, caption: '📄 Texto completo' })
     if (res.ogg) await ctx.replyWithVoice(new InputFile(res.ogg, 'traduccion.ogg'), { ...replyTo, caption: `🔊 ${vtLangName(res.target)}` })
     await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => {})
     console.log(`[traducir] ${media.image ? 'imagen' : 'voz'} ${res.source}→${res.target}`)
