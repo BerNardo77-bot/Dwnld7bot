@@ -34,7 +34,7 @@ Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con 
 /sticker /s — responde a una foto, o envía foto con caption /sticker
 
 🔍 Utilidades
-/traducir /traduce /tr /translate — traduce texto (ej: /traducir en Hola) o 🎙️ responde a una nota de voz/audio: te la paso a texto, traducida, en voz y con cómo se pronuncia (/tr = español→inglés u otro→español · /tr ja · /tr fr · /tr pt>es) · máx. 5 min
+/traducir /traduce /tr /translate — traduce texto (ej: /traducir en Hola) o 🎙️🖼️ responde a una nota de voz/audio o a una foto/captura: te mando el texto, la traducción, cómo se pronuncia y la voz (/tr = español→inglés u otro→español · /tr ja · /tr fr · /tr pt>es) · audio máx. 5 min
 /ping — latencia
 /menu /help /start — este menú
 

@@ -49,3 +49,13 @@ Sin esto Telegram solo deja enviar ~50 MB. Con el servidor local en el mismo tel
 
 La primera vez el bot hace `logOut` en la API oficial (Telegram lo exige para moverlo al servidor local). Si después vuelves a `npm start` (50 MB), Telegram puede tardar ~10 min en aceptarlo.
 Logs del servidor: `~/.tgbotapi/server.log`.
+
+## Traducir imágenes (OCR)
+
+`tr` también lee el texto de fotos y capturas. Para que sea rápido y sin límites instala tesseract una vez:
+
+```bash
+pkg install tesseract
+```
+
+Los idiomas (español e inglés primero) se bajan solos la primera vez a `~/.cache/tessdata-fast`. Sin tesseract funciona igual con OCR.space (gratis, con límite).
