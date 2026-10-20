@@ -85,12 +85,24 @@ export function createYtPicker({ onPick }) {
   function register(bot) {
     bot.callbackQuery(/^ytv:(\d+)$/, async (ctx) => {
       await ctx.answerCallbackQuery().catch(() => {})
-      try { if (!(await elegir(ctx, Number(ctx.match[1])))) await ctx.reply('Esa lista ya venció (5 min). Busca otra vez con /ytvideo.') } catch (e) { await ctx.reply(`Error: ${errText(e)}`).catch(() => {}) }
+      try { if (!(await elegir(ctx, Number(ctx.match[1])))) await ctx.reply('Esa lista ya venció (5 min). Busca otra vez con /ytsearch o /ytvideo.') } catch (e) { await ctx.reply(`Error: ${errText(e)}`).catch(() => {}) }
     })
     bot.hears(/^\s*(\d{1,2})\s*$/, async (ctx, next) => {
       if (!picks.has(String(ctx.chat?.id))) return next()
       try { if (!(await elegir(ctx, Number(ctx.match[1])))) return next() } catch (e) { await ctx.reply(`Error: ${errText(e)}`).catch(() => {}) }
     })
   }
-  return { listar, register }
+  // /ytsearch: guarda sus resultados para que el número (o el botón) baje ese video
+  async function remember(ctx, list, { quality = 'hd' } = {}) {
+    const items = (list || []).map((v) => {
+      const id = v.videoId || v.id || String(v.url || '').match(/(?:v=|youtu\.be\/|shorts\/)([\w-]{11})/)?.[1]
+      return id ? { id, title: v.title || 'Video' } : null
+    }).filter(Boolean).slice(0, MAX)
+    if (!items.length) return
+    picks.set(String(ctx.chat.id), { items, quality, until: Date.now() + PICK_MS })
+    ;(globalThis.__lastList || (globalThis.__lastList = new Map())).set(String(ctx.chat?.id), 'other')
+    const rows = [0, 5].filter((s) => s < items.length).map((s) => items.slice(s, s + 5).map((_, j) => ({ text: String(s + j + 1), callback_data: `ytv:${s + j + 1}` })))
+    await ctx.reply(`✎ Toca un botón o responde con el número (1-${items.length}) para bajarlo en 1080p · vale 5 min`, { reply_markup: { inline_keyboard: rows } }).catch(() => {})
+  }
+  return { listar, register, remember }
 }

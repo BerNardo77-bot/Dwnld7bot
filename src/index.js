@@ -61,7 +61,7 @@ import {
   handleVote, handleTrade, handleProfile, handleLevel, handleSetDesc, handleDelDesc,
   handleSetBirth, handleDelBirth, handleSetGenre, handleDelGenre, handleSetHobby,
   handleDelHobby, handleMarry, handleDivorce, handleWiki, handleImagen,
-  handlePin, handleYtSearch, handleTtSearch, handleApk, handleAms, handleAnime,
+  handlePin, handleYtSearch, setYtSearchPicker, handleTtSearch, handleApk, handleAms, handleAnime,
   ANIME_COMMANDS, handleStatus, handleInfobot, handleInvite, handleSuggest,
   handleRpg, handleGachaToggle, handleWelcomeToggle, handleByeToggle, handleSetWelcome,
   handleSetBye, handleKick, handlePromote, handleDemote, handleLink, handleGp,
@@ -665,6 +665,7 @@ registerEnvivo(bot)
 setVideoHandler((ctx, url) => handleVideo(ctx, 'hd', url))
 createPodcastHandlers({ maxSend: MAX_SEND }).register(bot)
 ytPicker.register(bot)
+setYtSearchPicker((ctx, list) => ytPicker.remember(ctx, list, { quality: 'hd' }))
 registerOversize(bot)
 const nsfwPicker = createNsfwPicker({ sendOrCompress, maxSend: MAX_SEND })
 nsfwPicker.register(bot)
@@ -818,7 +819,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.27 arrancando...')
+console.log('Dwnld7bot v1.4.28 arrancando...')
 
 async function goOnline() {
   try {
