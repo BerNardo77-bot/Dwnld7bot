@@ -4,3 +4,4 @@ tmp-dl/
 *.log
 data/store.json
 data/.telegram-local-logout.json
+data/.mtproto-session
