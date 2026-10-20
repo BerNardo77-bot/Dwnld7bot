@@ -23,7 +23,8 @@ import {
   errText,
   isNsfwEnabled,
   IS_TERMUX,
-  extractYoutubeId
+  extractYoutubeId,
+  cleanYtError
 } from './api.js'
 import { handleSticker, handlePhotoCaption } from './commands/stickers.js'
 import { handleHelp, handlePing } from './commands/info.js'
@@ -381,7 +382,7 @@ async function handleVideo(ctx, quality = 'hd', qPicked = '') {
         lastText = t
         ctx.api.editMessageText(ctx.chat.id, status.message_id, t).catch(() => {})
       }
-      await downloadYoutubeWithYtDlp(video.url || q, out, quality, { onProgress })
+      await downloadYoutubeWithYtDlp(video.url || q, out, quality, { onProgress, expectedSec: expected })
       usedYtdlp = true
       await ctx.api.editMessageText(ctx.chat.id, status.message_id, 'Descargado. Subiendo a Telegram...').catch(() => {})
     } catch (yterr) {
@@ -397,9 +398,9 @@ async function handleVideo(ctx, quality = 'hd', qPicked = '') {
           ctx.chat.id,
           status.message_id,
           'No pude bajar el video.\n' +
-            errText(yterr) +
+            cleanYtError(errText(yterr)) +
             '\n' +
-            'API de respaldo (alyacore): ' + (got.error || 'sin link') +
+            'API de respaldo (alyacore): ' + cleanYtError(got.error || 'sin link') +
             (IS_TERMUX ? '\n\nTip Termux:\npkg install python\npip install -U yt-dlp' : '') +
             '\n\nLink limpio:\n/ytvideo https://youtu.be/' +
             (String(video.videoId || ''))
@@ -417,7 +418,7 @@ async function handleVideo(ctx, quality = 'hd', qPicked = '') {
         return ctx.api.editMessageText(
           ctx.chat.id,
           status.message_id,
-          'Descarga fallo (¿302?).\n' + errText(e) + '\nInstala/actualiza yt-dlp.'
+          'La descarga de respaldo falló: ' + cleanYtError(errText(e))
         )
       }
     }
@@ -467,8 +468,8 @@ async function handleVideo(ctx, quality = 'hd', qPicked = '') {
   } catch (e) {
     console.error(e)
     await ctx.api
-      .editMessageText(ctx.chat.id, status.message_id, 'Error: ' + errText(e))
-      .catch(() => ctx.reply(errText(e)))
+      .editMessageText(ctx.chat.id, status.message_id, 'Error: ' + cleanYtError(errText(e)))
+      .catch(() => ctx.reply(cleanYtError(errText(e))))
   } finally {
     safeUnlink(out)
   }
@@ -817,7 +818,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.25 arrancando...')
+console.log('Dwnld7bot v1.4.26 arrancando...')
 
 async function goOnline() {
   try {
