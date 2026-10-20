@@ -245,6 +245,10 @@ function durTxt(sec) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`
 }
 
+// index.js conecta aquí el selector de /ytvideo para que el número tras /ytsearch descargue el video
+let onResults = null
+export function setYtSearchPicker(fn) { onResults = fn }
+
 export async function handleYtSearch(ctx) {
   const q = text(ctx)
   if (!q) return ctx.reply('Uso: /ytsearch <texto>\nEjemplo: /ytsearch quien es Anubis')
@@ -305,6 +309,7 @@ export async function handleYtSearch(ctx) {
         console.error(`[ytsearch] resultado ${i + 1} no enviado:`, errText(e))
       }
     }
+    if (onResults) await onResults(ctx, top)
   } catch (e) {
     await ctx.reply('Error: ' + errText(e)).catch(() => {})
   }
