@@ -1,4 +1,5 @@
 import path from 'path'
+import { initMtproto, sendBigFile, MTPROTO_MAX_SEND } from './mtproto.js'
 import { splitVideoEach, hasRoomToSplitEach, roomText, freeDisk, MAX_SPLIT_PARTS, partsFor, bigWarning } from './video-split.js'
 import { setSendLimit } from './api.js'
 import { offerOversize, registerOversize } from './oversize.js'
@@ -140,6 +141,9 @@ const MAX_SEND = useLocalApi
   ? Math.min(configuredMaxSend() || LOCAL_MAX_SEND, 2000 * 1024 * 1024)
   : Math.min(configuredMaxSend() || CLOUD_MAX_SEND, CLOUD_MAX_SEND)
 setSendLimit(MAX_SEND)
+// Modo 2 GB sin servidor extra: MTProto (gramjs) con TELEGRAM_API_ID/HASH del .env.
+const bigUpload = !useLocalApi && await initMtproto(token)
+const SEND_CAP = bigUpload ? MTPROTO_MAX_SEND : MAX_SEND
 
 // Subidas grandes (hasta ~2 GB) necesitan mas tiempo que el default de grammy.
 const botOpts = useLocalApi
@@ -286,26 +290,64 @@ bot.on('message:text', async (ctx, next) => {
 
 
 const TG_MAX_PARTS = Number(process.env.TG_MAX_PARTS) || MAX_SPLIT_PARTS // máx. 10 partes; más que eso → menor calidad
-async function sendOrCompress(ctx, filePath, { kind, fileName, caption, statusId, fallbackLink }) {
+// Envía un archivo: por Bot API si cabe en 49 MB; si no, por MTProto (hasta ~1950 MB).
+async function sendOneFile(ctx, file, name, kind, caption, statusId) {
+  const sz = fs.statSync(file).size
+  if (bigUpload && sz > MAX_SEND) {
+    let last = 0
+    try {
+      await sendBigFile(ctx.chat.id, file, {
+        kind, caption, fileName: name,
+        replyToMsgId: ctx.message?.message_id || ctx.callbackQuery?.message?.message_id,
+        onProgress: (p) => {
+          const pct = Math.floor(p * 100)
+          if (statusId && pct >= last + 10) { last = pct; ctx.api.editMessageText(ctx.chat.id, statusId, `Subiendo ${mb(sz)} MB… ${pct}%`).catch(() => {}) }
+        }
+      })
+      return
+    } catch (e) {
+      console.error('[mtproto] envío falló:', errText(e))
+      const err = new Error('mtproto: ' + errText(e)); err.mtproto = true; throw err
+    }
+  }
+  const input = new InputFile(file, name)
+  if (kind === 'audio') return ctx.replyWithAudio(input, { title: caption })
+  if (kind === 'video') {
+    try { return await ctx.replyWithVideo(input, { caption, supports_streaming: true }) } catch { return ctx.replyWithDocument(input, { caption }) }
+  }
+  return ctx.replyWithDocument(input, { caption })
+}
+
+async function sendOrCompress(ctx, filePath, opts) {
+  if (SEND_CAP > MAX_SEND) {
+    try { return await sendOrCompressCap(ctx, filePath, opts, SEND_CAP) } catch (e) {
+      if (!e?.mtproto || e.partsSent) throw e
+      console.error('[mtproto] vuelvo al modo 49 MB')
+    }
+  }
+  return sendOrCompressCap(ctx, filePath, opts, MAX_SEND)
+}
+
+async function sendOrCompressCap(ctx, filePath, { kind, fileName, caption, statusId, fallbackLink }, CAP) {
   let pathToSend = filePath
   let size = fs.statSync(pathToSend).size
   let compressedPath = null
 
-  if (size > MAX_SEND && kind === 'video' && partsFor(size, MAX_SEND) <= TG_MAX_PARTS) {
+  if (size > CAP && kind === 'video' && partsFor(size, CAP) <= TG_MAX_PARTS) {
     // Video más grande que el límite de Telegram: partes por tiempo (ffmpeg -c copy), misma calidad.
     // Se corta y manda UNA parte a la vez (solo hace falta espacio para el video + 1 parte).
-    if (!hasRoomToSplitEach(size, MAX_SEND, path.dirname(filePath))) {
-      await ctx.reply(`No hay espacio en el servidor para partir el video (${roomText(size, MAX_SEND, path.dirname(filePath))}).`).catch(() => {})
+    if (!hasRoomToSplitEach(size, CAP, path.dirname(filePath))) {
+      await ctx.reply(`No hay espacio en el servidor para partir el video (${roomText(size, CAP, path.dirname(filePath))}).`).catch(() => {})
     } else {
       let sent = 0
       try {
-        const n0 = partsFor(size, MAX_SEND)
-        if (statusId) await ctx.api.editMessageText(ctx.chat.id, statusId, `Pesa ${mb(size)} MB (límite ${mb(MAX_SEND)} MB por archivo). Te lo mando en ${n0} partes, sin bajar la calidad…`).catch(() => {})
-        const total = await splitVideoEach(filePath, MAX_SEND, {
+        const n0 = partsFor(size, CAP)
+        if (statusId) await ctx.api.editMessageText(ctx.chat.id, statusId, `Pesa ${mb(size)} MB (límite ${mb(CAP)} MB por archivo). Te lo mando en ${n0} partes, sin bajar la calidad…`).catch(() => {})
+        const total = await splitVideoEach(filePath, CAP, {
           title: String(fileName || 'video').replace(/\.mp4$/i, ''), maxParts: TG_MAX_PARTS + 3, deleteSource: false,
           onPart: async (p) => {
             const cap = `${caption || ''}\n📦 Parte ${p.index}/${p.total}`.trim()
-            try { await ctx.replyWithVideo(new InputFile(p.file, p.name), { caption: cap, supports_streaming: true }) } catch { await ctx.replyWithDocument(new InputFile(p.file, p.name), { caption: cap }) }
+            await sendOneFile(ctx, p.file, p.name, 'video', cap, statusId)
             sent++
           }
         })
@@ -315,29 +357,19 @@ async function sendOrCompress(ctx, filePath, { kind, fileName, caption, statusId
         return true
       } catch (e) {
         console.error('[split]', errText(e))
+        if (e?.mtproto && !sent) throw e
         if (sent) { await ctx.reply(`No pude mandar el resto de las partes (${errText(e).slice(0, 120)}).`).catch(() => {}); return true }
       }
     }
   }
-  if (size > MAX_SEND) {
+  if (size > CAP) {
     return offerOversize(ctx, {
       file: filePath, kind, fileName, caption, statusId, link: fallbackLink || '',
       linkNote: fallbackLink && !/youtu|xnxx\.com|xvideos\.com|tiktok\.com|x\.com|twitter\.com/i.test(fallbackLink) ? 'Ese enlace puede vencer en unas horas.' : ''
     })
   }
 
-  const input = new InputFile(pathToSend, fileName)
-  if (kind === 'audio') {
-    await ctx.replyWithAudio(input, { title: caption })
-  } else if (kind === 'video') {
-    try {
-      await ctx.replyWithVideo(input, { caption })
-    } catch {
-      await ctx.replyWithDocument(input, { caption })
-    }
-  } else {
-    await ctx.replyWithDocument(input, { caption })
-  }
+  await sendOneFile(ctx, pathToSend, fileName, kind, caption, statusId)
   safeUnlink(compressedPath)
   if (statusId) await ctx.api.deleteMessage(ctx.chat.id, statusId).catch(() => {})
   return true
@@ -392,14 +424,14 @@ async function handleVideo(ctx, quality = 'hd', qPicked = '') {
         lastText = t
         ctx.api.editMessageText(ctx.chat.id, status.message_id, t).catch(() => {})
       }
-      await downloadYoutubeWithYtDlp(video.url || q, out, quality, { onProgress, expectedSec: expected, maxTotalBytes: Math.min(MAX_SEND * TG_MAX_PARTS * 0.9, Math.max(0, freeDisk(path.dirname(out)) - MAX_SEND - 300 * 1024 * 1024)) || 1 })
+      await downloadYoutubeWithYtDlp(video.url || q, out, quality, { onProgress, expectedSec: expected, maxTotalBytes: Math.min(SEND_CAP * TG_MAX_PARTS * 0.9, Math.max(0, freeDisk(path.dirname(out)) - SEND_CAP - 300 * 1024 * 1024)) || 1 })
       usedYtdlp = true
       // ¿Bajó en menos de 1080p por el tope de partes/espacio? Se avisa.
       try {
         const { execFileSync } = await import('child_process')
         const hgt = Number(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=height', '-of', 'csv=p=0', out], { timeout: 30000 }).toString().trim()) || 0
         if (quality !== 'fit' && hgt && hgt < 1000 && expected) {
-          await ctx.reply(`Salió en ${hgt}p: 1080p no estaba disponible o pasaba de ${TG_MAX_PARTS} partes de ${mb(MAX_SEND)} MB (o del espacio del servidor).`).catch(() => {})
+          await ctx.reply(`Salió en ${hgt}p: 1080p no estaba disponible o pasaba de ${TG_MAX_PARTS} partes de ${mb(SEND_CAP)} MB (o del espacio del servidor).`).catch(() => {})
         }
       } catch {}
       await ctx.api.editMessageText(ctx.chat.id, status.message_id, 'Descargado. Subiendo a Telegram...').catch(() => {})
@@ -837,7 +869,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.29 arrancando...')
+console.log('Dwnld7bot v1.4.30 arrancando...')
 
 async function goOnline() {
   try {
