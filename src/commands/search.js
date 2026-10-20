@@ -1,6 +1,9 @@
 import fetch from 'node-fetch'
+import yts from 'yt-search'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { InputFile } from 'grammy'
-import { argText, getConfig, errText, isNsfwEnabled, sendLimit, downloadToFile, tmpPath, safeUnlink, mb } from '../api.js'
+import { resolveYtDlpBin, argText, getConfig, errText, isNsfwEnabled, sendLimit, downloadToFile, tmpPath, safeUnlink, mb } from '../api.js'
 import fs from 'fs'
 import { offerOversize } from '../oversize.js'
 import { chatOf } from '../store.js'
@@ -16,6 +19,8 @@ const CAPTION_MAX = 1024 // límite de Telegram para pies de foto
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // Reintenta una vez si Telegram responde 429 (demasiadas peticiones)
+const execFileP = promisify(execFile)
+
 async function conReintento(fn) {
   try {
     return await fn()
@@ -213,6 +218,33 @@ function textoResultado(v, i, total) {
   return (head + extra).slice(0, CAPTION_MAX)
 }
 
+// Búsqueda en YouTube sin API de pago. Devuelve objetos con los mismos campos que usa textoResultado.
+export async function buscarYouTubeLocal(q, n = 10) {
+  let errs = []
+  try {
+    const r = await Promise.race([yts(q), new Promise((_, rej) => setTimeout(() => rej(new Error('yt-search tardó')), 20000))])
+    const vids = (r?.videos || []).filter((v) => v.videoId).slice(0, n)
+    if (vids.length) return vids.map((v) => ({ title: v.title, videoId: v.videoId, url: `https://www.youtube.com/watch?v=${v.videoId}`, duration: v.timestamp || '', autor: v.author?.name || '', views: v.views ? Number(v.views).toLocaleString('es-MX') : '', uploaded: v.ago || '', thumbnail: v.thumbnail || v.image || '' }))
+  } catch (e) { errs.push('yt-search: ' + e.message) }
+  // yt-dlp: primero directo; con proxy solo si YouTube pide confirmar que no es un bot
+  const bin = resolveYtDlpBin() || 'yt-dlp'
+  const proxy = String(process.env.YT_DLP_PROXY || process.env.YT_PROXY || '').trim()
+  for (const net of proxy ? [[], ['--proxy', proxy]] : [[]]) {
+    try {
+      const { stdout } = await execFileP(bin, [...net, '--flat-playlist', '-J', '--no-warnings', `ytsearch${n}:${q}`], { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
+      const list = (JSON.parse(stdout)?.entries || []).filter((e) => e?.id)
+      if (list.length) return list.map((e) => ({ title: e.title, videoId: e.id, url: `https://www.youtube.com/watch?v=${e.id}`, duration: durTxt(e.duration), autor: e.channel || e.uploader || '', views: e.view_count ? Number(e.view_count).toLocaleString('es-MX') : '', uploaded: '', thumbnail: e.thumbnails?.at?.(-1)?.url || '' }))
+    } catch (e) { errs.push('yt-dlp: ' + String(e.stderr || e.message).split('\n').find((l) => /ERROR/.test(l)) || e.message) }
+  }
+  throw new Error(errs.join(' | ').slice(0, 300) || 'sin resultados')
+}
+function durTxt(sec) {
+  sec = Math.round(Number(sec) || 0)
+  if (!sec) return ''
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), x = String(sec % 60).padStart(2, '0')
+  return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`
+}
+
 export async function handleYtSearch(ctx) {
   const q = text(ctx)
   if (!q) return ctx.reply('Uso: /ytsearch <texto>\nEjemplo: /ytsearch quien es Anubis')
@@ -221,26 +253,29 @@ export async function handleYtSearch(ctx) {
   const base = apiBase()
   let last = 'Sin resultados'
 
-  // 1) Búsqueda: si falla aquí es que de verdad no hubo resultados
+  // 1) Búsqueda propia (gratis, sin saldo): yt-search → yt-dlp → API externa solo como último recurso
   let top = null
-  for (const key of apiKeys()) {
+  try { top = await buscarYouTubeLocal(q, MAX_RESULTADOS) } catch (e) { last = e.message || last }
+  if (!top?.length) top = null
+  for (const key of top ? [] : apiKeys()) {
     try {
       const url = `${base}/search/yt?query=${encodeURIComponent(q)}&key=${encodeURIComponent(key)}`
       const res = await fetch(url, { signal: AbortSignal.timeout(20000) })
       const json = await res.json().catch(() => ({}))
       const list = json?.result || json?.data || []
       if (!json?.status || !Array.isArray(list) || !list.length) {
-        last = json?.message || last
+        // "se acabó tu saldo" / límites de la API: no se le muestra al usuario
+        console.error('[ytsearch] API:', json?.message || 'sin resultados')
         continue
       }
       top = list.slice(0, MAX_RESULTADOS)
       break
     } catch (e) {
-      last = e.message || last
+      console.error('[ytsearch] API:', e.message)
     }
   }
   if (!top) {
-    return ctx.api.editMessageText(ctx.chat.id, status.message_id, `No encontre videos para ${q}.\n${last}`).catch(() => {})
+    return ctx.api.editMessageText(ctx.chat.id, status.message_id, `No encontré videos para ${q}. Prueba con otras palabras.`).catch(() => {})
   }
 
   // 2) Envío: un mensaje por resultado. Miniaturas en paralelo; si una falla, ese resultado va en texto
