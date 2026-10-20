@@ -1,4 +1,5 @@
-import { splitVideo, cleanParts, partsFor, maxPartsFor, bigWarning } from './video-split.js'
+import path from 'path'
+import { splitVideoEach, hasRoomToSplitEach, roomText, freeDisk, MAX_SPLIT_PARTS, partsFor, bigWarning } from './video-split.js'
 import { setSendLimit } from './api.js'
 import { offerOversize, registerOversize } from './oversize.js'
 import { findTiktokUrls } from './tt-url.js'
@@ -284,30 +285,39 @@ bot.on('message:text', async (ctx, next) => {
 })
 
 
-const TG_MAX_PARTS = Number(process.env.TG_MAX_PARTS) || maxPartsFor(MAX_SEND) // ≈ MAX_TOTAL_GB (40) / límite por archivo
+const TG_MAX_PARTS = Number(process.env.TG_MAX_PARTS) || MAX_SPLIT_PARTS // máx. 10 partes; más que eso → menor calidad
 async function sendOrCompress(ctx, filePath, { kind, fileName, caption, statusId, fallbackLink }) {
   let pathToSend = filePath
   let size = fs.statSync(pathToSend).size
   let compressedPath = null
 
   if (size > MAX_SEND && kind === 'video' && partsFor(size, MAX_SEND) <= TG_MAX_PARTS) {
-    // Video más grande que el límite de Telegram: partes por tiempo (ffmpeg -c copy), misma calidad
-    let parts = null
-    try {
-      if (statusId) await ctx.api.editMessageText(ctx.chat.id, statusId, `Pesa ${mb(size)} MB (límite ${mb(MAX_SEND)} MB). Lo parto en ${partsFor(size, MAX_SEND)} partes, sin bajar la calidad…`).catch(() => {})
-      parts = await splitVideo(filePath, MAX_SEND, { title: String(fileName || 'video').replace(/\.mp4$/i, ''), maxParts: TG_MAX_PARTS + 3, deleteSource: false })
-      const warn = bigWarning(size, parts.length)
-      if (warn) await ctx.reply(warn).catch(() => {})
-      for (const p of parts) {
-        const inp = new InputFile(p.file, p.name)
-        const cap = `${caption || ''}\n📦 Parte ${p.index} de ${p.total}`.trim()
-        try { await ctx.replyWithVideo(inp, { caption: cap, supports_streaming: true }) } catch { await ctx.replyWithDocument(new InputFile(p.file, p.name), { caption: cap }) }
+    // Video más grande que el límite de Telegram: partes por tiempo (ffmpeg -c copy), misma calidad.
+    // Se corta y manda UNA parte a la vez (solo hace falta espacio para el video + 1 parte).
+    if (!hasRoomToSplitEach(size, MAX_SEND, path.dirname(filePath))) {
+      await ctx.reply(`No hay espacio en el servidor para partir el video (${roomText(size, MAX_SEND, path.dirname(filePath))}).`).catch(() => {})
+    } else {
+      let sent = 0
+      try {
+        const n0 = partsFor(size, MAX_SEND)
+        if (statusId) await ctx.api.editMessageText(ctx.chat.id, statusId, `Pesa ${mb(size)} MB (límite ${mb(MAX_SEND)} MB por archivo). Te lo mando en ${n0} partes, sin bajar la calidad…`).catch(() => {})
+        const total = await splitVideoEach(filePath, MAX_SEND, {
+          title: String(fileName || 'video').replace(/\.mp4$/i, ''), maxParts: TG_MAX_PARTS + 3, deleteSource: false,
+          onPart: async (p) => {
+            const cap = `${caption || ''}\n📦 Parte ${p.index}/${p.total}`.trim()
+            try { await ctx.replyWithVideo(new InputFile(p.file, p.name), { caption: cap, supports_streaming: true }) } catch { await ctx.replyWithDocument(new InputFile(p.file, p.name), { caption: cap }) }
+            sent++
+          }
+        })
+        const warn = bigWarning(size, total)
+        if (warn) await ctx.reply(warn).catch(() => {})
+        if (statusId) await ctx.api.deleteMessage(ctx.chat.id, statusId).catch(() => {})
+        return true
+      } catch (e) {
+        console.error('[split]', errText(e))
+        if (sent) { await ctx.reply(`No pude mandar el resto de las partes (${errText(e).slice(0, 120)}).`).catch(() => {}); return true }
       }
-      if (statusId) await ctx.api.deleteMessage(ctx.chat.id, statusId).catch(() => {})
-      return true
-    } catch (e) {
-      console.error('[split]', errText(e))
-    } finally { cleanParts(parts) }
+    }
   }
   if (size > MAX_SEND) {
     return offerOversize(ctx, {
@@ -382,8 +392,16 @@ async function handleVideo(ctx, quality = 'hd', qPicked = '') {
         lastText = t
         ctx.api.editMessageText(ctx.chat.id, status.message_id, t).catch(() => {})
       }
-      await downloadYoutubeWithYtDlp(video.url || q, out, quality, { onProgress, expectedSec: expected })
+      await downloadYoutubeWithYtDlp(video.url || q, out, quality, { onProgress, expectedSec: expected, maxTotalBytes: Math.min(MAX_SEND * TG_MAX_PARTS * 0.9, Math.max(0, freeDisk(path.dirname(out)) - MAX_SEND - 300 * 1024 * 1024)) || 1 })
       usedYtdlp = true
+      // ¿Bajó en menos de 1080p por el tope de partes/espacio? Se avisa.
+      try {
+        const { execFileSync } = await import('child_process')
+        const hgt = Number(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=height', '-of', 'csv=p=0', out], { timeout: 30000 }).toString().trim()) || 0
+        if (quality !== 'fit' && hgt && hgt < 1000 && expected) {
+          await ctx.reply(`Salió en ${hgt}p: 1080p no estaba disponible o pasaba de ${TG_MAX_PARTS} partes de ${mb(MAX_SEND)} MB (o del espacio del servidor).`).catch(() => {})
+        }
+      } catch {}
       await ctx.api.editMessageText(ctx.chat.id, status.message_id, 'Descargado. Subiendo a Telegram...').catch(() => {})
     } catch (yterr) {
       console.error('[ytvideo] yt-dlp', yterr)
@@ -819,7 +837,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.28 arrancando...')
+console.log('Dwnld7bot v1.4.29 arrancando...')
 
 async function goOnline() {
   try {

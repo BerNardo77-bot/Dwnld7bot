@@ -164,7 +164,7 @@ function runYtdlp(cmd, args, { onProgress, stallMs, deadline }) {
   })
 }
 
-export async function downloadYoutubeWithYtDlp(videoUrlOrId, destPath, quality = 'hd', { onProgress, expectedSec = 0 } = {}) {
+export async function downloadYoutubeWithYtDlp(videoUrlOrId, destPath, quality = 'hd', { onProgress, expectedSec = 0, maxTotalBytes = 0 } = {}) {
   const id = extractYoutubeId(videoUrlOrId) || String(videoUrlOrId).trim()
   const url =
     id.length === 11 && !id.includes('/')
@@ -178,7 +178,15 @@ export async function downloadYoutubeWithYtDlp(videoUrlOrId, destPath, quality =
   // Por defecto alta calidad (hasta 1080p). fit queda como opcion baja.
   const fmtHd = 'bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/best'
   const fmtFit = 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/bv*[height<=1080]+ba/best'
-  const fmt = quality === 'fit' ? fmtFit : fmtHd
+  // maxTotalBytes: lo más que puede pesar (máx. de partes × límite por archivo, y el espacio libre).
+  // Se queda en 1080p si cabe; si no, yt-dlp toma 720p, 480p… (los tamaños desconocidos pasan)
+  const capped = (() => {
+    if (!maxTotalBytes || quality === 'fit') return ''
+    const v = Math.floor(maxTotalBytes * 0.93)
+    const lim = `[filesize<?${v}][filesize_approx<?${v}]`
+    return [1080, 720, 480, 360].map((h) => `bv*[height<=${h}][ext=mp4]${lim}+ba[ext=m4a]/bv*[height<=${h}]${lim}+ba`).join('/') + '/b[height<=480]/best'
+  })()
+  const fmt = quality === 'fit' ? fmtFit : (capped || fmtHd)
   // Opcional en Render: YT_PROXY (http://user:pass@host:port) y YT_COOKIES (texto Netscape o base64)
   const extra = ['--js-runtimes', 'node', '--remote-components', 'ejs:github']
   const cookies = ytCookiesFile()
