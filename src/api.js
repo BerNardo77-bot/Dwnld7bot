@@ -106,7 +106,7 @@ export function ytReason(line) {
   const l = String(line || '')
   let why = ''
   if (/Sign in to confirm|not a bot/i.test(l)) why = 'YouTube bloquea al servidor (pide confirmar que no es un bot). Hace falta YT_COOKIES o YT_PROXY.'
-  else if (/country/i.test(l)) why = 'bloqueado por país desde el servidor'
+  else if (/country|claimed content|blocked due to/i.test(l)) why = 'bloqueado por país o por derechos de autor desde el servidor'
   else if (/Private video/i.test(l)) why = 'el video es privado'
   else if (/copyright/i.test(l)) why = 'quitado por derechos de autor'
   else if (/removed|terminated/i.test(l)) why = 'el video fue eliminado'
@@ -164,7 +164,7 @@ function runYtdlp(cmd, args, { onProgress, stallMs, deadline }) {
   })
 }
 
-export async function downloadYoutubeWithYtDlp(videoUrlOrId, destPath, quality = 'hd', { onProgress } = {}) {
+export async function downloadYoutubeWithYtDlp(videoUrlOrId, destPath, quality = 'hd', { onProgress, expectedSec = 0 } = {}) {
   const id = extractYoutubeId(videoUrlOrId) || String(videoUrlOrId).trim()
   const url =
     id.length === 11 && !id.includes('/')
@@ -180,27 +180,36 @@ export async function downloadYoutubeWithYtDlp(videoUrlOrId, destPath, quality =
   const fmtFit = 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/bv*[height<=1080]+ba/best'
   const fmt = quality === 'fit' ? fmtFit : fmtHd
   // Opcional en Render: YT_PROXY (http://user:pass@host:port) y YT_COOKIES (texto Netscape o base64)
-  const extra = ['--js-runtimes', 'node']
+  const extra = ['--js-runtimes', 'node', '--remote-components', 'ejs:github']
   const cookies = ytCookiesFile()
   if (cookies) extra.push('--cookies', cookies)
   // YT_PROXY (opcional): primero directo; el proxy solo si directo falla
   const proxy = String(process.env.YT_PROXY || '').trim()
   const base = ['--merge-output-format', 'mp4', '--no-playlist', '--no-warnings', '-o', outTpl, url]
-  const clients = String(process.env.YT_CLIENTS || 'default,tv,tv_simply,web_safari,mweb,android_vr').split(',').map((c) => c.trim()).filter(Boolean)
+  const clients = String(process.env.YT_CLIENTS || 'default,tv,web_safari,mweb,android_vr,tv_embedded').split(',').map((c) => c.trim()).filter(Boolean)
   const routes = proxy ? [[], ['--proxy', proxy]] : [[]]
   const exe = bin || 'yt-dlp'
   const attempts = []
   for (const r of routes) {
     for (const c of clients) {
       const ea = c === 'default' ? [] : ['--extractor-args', `youtube:player_client=${c}`]
-      attempts.push([exe, [...extra, ...r, ...ea, '-f', fmt, ...base], r.length ? 'proxy' : 'directo'])
+      // Directo: 4 pedazos a la vez. Proxy: 1 sola conexión e IPv4, porque los enlaces de googlevideo van
+      // firmados para UNA IP y un proxy residencial puede cambiar de IP en cada conexión (eso da 403).
+      const net = r.length ? ['--force-ipv4', '-N', '1', '--http-chunk-size', '10M', '--retries', '5', '--fragment-retries', '10'] : ['-N', '4', '--http-chunk-size', '10M', '--retries', '3', '--fragment-retries', '5']
+      attempts.push([exe, [...extra, ...r, ...net, ...ea, '-f', fmt, ...base], r.length ? 'proxy' : 'directo'])
     }
   }
   const stallMs = (Number(process.env.YT_STALL_MIN) || 4) * 60_000
-  const deadline = Date.now() + (Number(process.env.YT_MAX_MIN) || 60) * 60_000
+  // Tiempo máximo según lo que dura el video (una película de 2 h necesita más que 60 min por proxy).
+  // El corte real es por "sin avanzar" (stallMs); esto es solo un tope de seguridad (máx. 8 h).
+  const baseMin = Number(process.env.YT_MAX_MIN) || 60
+  const durMin = Number(expectedSec) > 0 ? Number(expectedSec) / 60 : 0
+  const deadline = Date.now() + Math.min(480, Math.max(baseMin, Math.round(durMin * 1.5 + 30))) * 60_000
+  let skipRoute = ''
 
   let lastErr = 'yt-dlp no encontrado'
   for (const [cmd, args, route] of attempts) {
+    if (route === skipRoute) continue
     if (Date.now() > deadline) { lastErr = 'La descarga tardó demasiado y la cancelé.'; break }
     try {
       onProgress?.({ route })
@@ -228,15 +237,28 @@ export async function downloadYoutubeWithYtDlp(videoUrlOrId, destPath, quality =
       const errLine = msg.split('\n').find((l) => /ERROR:/.test(l)) || msg
       if (!(e?.code === 'ENOENT' && lastErr !== 'yt-dlp no encontrado')) lastErr = errLine.trim().slice(0, 240)
       console.error('[yt-dlp]', cmd, lastErr)
-      if (/Private video|copyright|been removed|terminated|not available in your country/i.test(msg)) break
+      // Bloqueo por país / reclamo de derechos / IP de servidor: los otros clientes directos darán lo mismo,
+      // se pasa directo al proxy (si hay).
+      if (route === 'directo' && proxy && /not available in your country|blocked it in your country|claimed content|blocked due to|Video unavailable|not a bot|Sign in to confirm|HTTP Error 403/i.test(msg)) { skipRoute = 'directo'; continue }
+      if (/Private video|been removed|terminated/i.test(msg)) break
+      if (!proxy && /not available in your country|blocked it in your country|claimed content/i.test(msg)) break
       if (e?.killed === 'DEADLINE') break
     }
   }
+  lastErr = cleanYtError(lastErr)
   const err = new Error(`yt-dlp fallo: ${ytReason(lastErr)}`)
   err.ytdlp = ytReason(lastErr)
   throw err
 }
 
+
+/** Quita enlaces largos (googlevideo firmados, túneles, etc.) y deja un texto corto para el usuario. */
+export function cleanYtError(t) {
+  let s = String(t || '').replace(/^.*?ERROR:\s*(\[[^\]]+\]\s*[\w-]+:\s*)?/, '')
+  s = s.replace(/https?:\/\/([^\/\s?#]+)[^\s]*/gi, (_, host) => `(${host.replace(/^rr\d+---sn-[\w-]+\./, '')})`)
+  if (/403|Forbidden/i.test(s)) s = 'YouTube negó la descarga (403). ' + (/googlevideo/i.test(s) ? 'El enlace solo servía para otra conexión.' : '')
+  return s.replace(/\s+/g, ' ').trim().slice(0, 200)
+}
 
 function defaultDlHeaders(url) {
   const u = String(url)
