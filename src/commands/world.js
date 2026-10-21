@@ -713,6 +713,7 @@ export {
   handleImagen,
   handlePin,
   handleYtSearch,
+  setYtSearchPicker,
   handleTtSearch,
   handleApk,
   handleAms
