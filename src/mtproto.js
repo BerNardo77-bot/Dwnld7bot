@@ -8,6 +8,28 @@ import { spawnSync } from 'node:child_process'
 import { TelegramClient, Api } from 'telegram'
 import { StringSession } from 'telegram/sessions/index.js'
 import { Logger, LogLevel } from 'telegram/extensions/Logger.js'
+import { ConnectionTCPObfuscated } from 'telegram/network/index.js'
+
+// gramjs imprime muchísimo cuando no hay red. Lo callamos y dejamos una línea corta como mucho 1 vez por minuto.
+let lastNote = 0
+let disabled = false
+function netNote(msg = '[mtproto] sin red, reintentando...') {
+  if (disabled) return // ya desactivado (sigue con 49 MB): no ensuciar el log
+  const now = Date.now()
+  if (now - lastNote < 60000) return
+  lastNote = now
+  console.log(msg)
+}
+class QuietLogger extends Logger {
+  constructor() { super(LogLevel.ERROR) }
+  canSend() { return false } // gramjs no imprime nada por su cuenta (ni trazas con console.error)
+  _log(level, message) {
+    if (level !== LogLevel.ERROR && level !== LogLevel.WARN) return
+    const m = String(message || '')
+    if (/connect|network|ENETUNREACH|ECONN|ETIMEDOUT|EHOSTUNREACH|closed|Not connected|reconnect/i.test(m)) netNote()
+    else netNote('[mtproto] aviso: ' + m.slice(0, 120))
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SESSION_FILE = path.join(__dirname, '..', 'data', '.mtproto-session')
@@ -15,7 +37,6 @@ export const MTPROTO_MAX_SEND = 1950 * 1024 * 1024
 
 let client = null
 let ready = null
-let disabled = false
 
 export function mtprotoConfigured() {
   const id = Number(process.env.TELEGRAM_API_ID)
@@ -35,13 +56,18 @@ export async function initMtproto(botToken) {
       try { saved = fs.readFileSync(SESSION_FILE, 'utf8').trim() } catch {}
       const c = new TelegramClient(new StringSession(saved), Number(process.env.TELEGRAM_API_ID),
         String(process.env.TELEGRAM_API_HASH).trim(), {
-          connectionRetries: 5, useWSS: false,
-          baseLogger: new Logger(LogLevel.ERROR)
+          // TCP (no WebSocket) por el puerto 443: en Node gramjs usa sockets TCP siempre; useWSS:true
+          // solo cambia el puerto 80 → 443 (muchas compañías bloquean el 80). Obfuscated evita bloqueos por DPI.
+          connection: ConnectionTCPObfuscated, useWSS: true,
+          connectionRetries: 5, retryDelay: 5000, autoReconnect: true, reconnectRetries: Infinity,
+          requestRetries: 5, timeout: 20,
+          baseLogger: new QuietLogger()
         })
+      c._errorHandler = async () => { netNote() }
       await Promise.race([
         c.start({ botAuthToken: botToken }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('tiempo de conexión agotado')), 60000))
-      ]).catch(async (e) => { try { await c.destroy() } catch {} ; throw e })
+      ]).catch(async (e) => { disabled = true; try { await c.disconnect() } catch {} ; try { await c.destroy() } catch {} ; throw e })
       try {
         fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true })
         fs.writeFileSync(SESSION_FILE, c.session.save(), { mode: 0o600 })
@@ -56,6 +82,21 @@ export async function initMtproto(botToken) {
     }
   })()
   return ready
+}
+
+// Antes de cada subida grande: asegura conexión (máx. ~60 s); si no, el bot usa partes de 49 MB.
+async function ensureConnected(maxMs = 60000) {
+  if (!client) throw new Error('MTProto no está listo')
+  if (client.connected) return
+  const t0 = Date.now()
+  while (Date.now() - t0 < maxMs) {
+    try {
+      await Promise.race([client.connect(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000))])
+      if (client.connected) return
+    } catch { netNote() }
+    await new Promise(r => setTimeout(r, 5000))
+  }
+  throw new Error('sin conexión MTProto')
 }
 
 // Bot API → peer MTProto. En privados y grupos normales, el mensaje del usuario trae su access_hash.
@@ -91,7 +132,7 @@ function probe(file) {
 
 // Manda un archivo grande. kind: 'video' | 'audio' | 'document'
 export async function sendBigFile(chatId, filePath, { kind = 'document', caption = '', fileName, replyToMsgId, onProgress } = {}) {
-  if (!client) throw new Error('MTProto no está listo')
+  await ensureConnected()
   const peer = await resolvePeer(chatId, replyToMsgId)
   const name = fileName || path.basename(filePath)
   const attributes = [new Api.DocumentAttributeFilename({ fileName: name })]
