@@ -289,7 +289,7 @@ bot.on('message:text', async (ctx, next) => {
 })
 
 
-const TG_MAX_PARTS = Number(process.env.TG_MAX_PARTS) || MAX_SPLIT_PARTS // máx. 10 partes; más que eso → menor calidad
+const TG_MAX_PARTS = Number(process.env.TG_MAX_PARTS) || (SEND_CAP > MAX_SEND ? MAX_SPLIT_PARTS : 10) // 26 partes de ~1950 MB (~50 GB); sin MTProto (49 MB) máx. 10 partes
 // Envía un archivo: por Bot API si cabe en 49 MB; si no, por MTProto (hasta ~1950 MB).
 async function sendOneFile(ctx, file, name, kind, caption, statusId) {
   const sz = fs.statSync(file).size
@@ -869,7 +869,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.31 arrancando...')
+console.log('Dwnld7bot v1.4.32 arrancando...')
 
 async function goOnline() {
   try {

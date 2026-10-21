@@ -11,7 +11,7 @@ import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
 const FALLBACK_KEY = 'LUFFY-FIX67'
-export const MAX_DOWNLOAD = Number(process.env.MAX_DOWNLOAD_BYTES || 10 * 1024 * 1024 * 1024) // 10 GB (y nunca más que el espacio libre)
+export const MAX_DOWNLOAD = Number(process.env.MAX_DOWNLOAD_BYTES || 50 * 1024 * 1024 * 1024) // 50 GB (y nunca más que el espacio libre)
 export const TMP_DIR = path.join(process.cwd(), 'tmp-dl')
 
 export function getConfig() {
