@@ -42,6 +42,7 @@ import { handleRadio, registerRadio, RADIO_COMMANDS } from './commands/radio.js'
 import { handleSpace, SPACE_COMMANDS } from './commands/space.js'
 import { handleMapa, registerMapa, MAPA_COMMANDS } from './commands/mapa.js'
 import { handleEnvivo, registerEnvivo, ENVIVO_COMMANDS } from './commands/envivo.js'
+import { createTvHandler, TV_COMMANDS, isDirectStream } from './commands/tv.js'
 import { createNsfwPicker } from './commands/nsfwpick.js'
 import {
   handleDanbooru,
@@ -712,6 +713,8 @@ registerMusic(bot) // antes de los otros pickers: el número va a la lista más 
 registerRadio(bot) // /radio: número/botón solo si la lista más reciente es de radio
 registerMapa(bot) // /mapa: número/botón solo si la lista más reciente es de mapa
 registerEnvivo(bot)
+const tvBot = createTvHandler(sendOrCompress, { partCap: () => SEND_CAP })
+tvBot.register(bot)
 setVideoHandler((ctx, url) => handleVideo(ctx, 'hd', url))
 createPodcastHandlers({ maxSend: MAX_SEND }).register(bot)
 ytPicker.register(bot)
@@ -738,7 +741,9 @@ bot.command(APPLE_COMMANDS, handleApple)
 bot.command(RADIO_COMMANDS, handleRadio)
 bot.command(SPACE_COMMANDS, handleSpace)
 bot.command(MAPA_COMMANDS, handleMapa)
-bot.command(ENVIVO_COMMANDS, handleEnvivo)
+// /envivo con link directo .m3u8/rtmp → grabación de TV en video (/tv); YouTube/TikTok siguen en /envivo
+bot.command(ENVIVO_COMMANDS, (ctx) => isDirectStream(String(ctx.message?.text || '').split(/\s+/)[1] || '') ? tvBot.handle(ctx) : handleEnvivo(ctx))
+bot.command(TV_COMMANDS, (ctx) => tvBot.handle(ctx))
 bot.command(['ytvideo', 'mp4', 'playvideo', 'play2', 'ytmp4'], handleVideo)
 bot.command(['ytvideohd', 'mp4hd', 'hdvideo', 'playvideohd'], handleVideoHd)
 // /xvideos: búsqueda/enlace de xvideos.com con lista; enlaces .mp4 de CDN siguen por el handler viejo
@@ -869,7 +874,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.33 arrancando...')
+console.log('Dwnld7bot v1.4.34 arrancando...')
 
 async function goOnline() {
   try {
