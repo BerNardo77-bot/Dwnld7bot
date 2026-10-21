@@ -10,7 +10,7 @@ function uptimeStr() {
 
 export const helpText = `⚓ Dwnld7bot v1.3.0
 
-Descargas a disco hasta ~2GB.
+Descargas a disco hasta 50 GB (videos en partes de hasta ~1.9 GB, máx. 26 partes).
 Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con servidor local), comprime o manda link.
 
 📥 Descargas (HD)

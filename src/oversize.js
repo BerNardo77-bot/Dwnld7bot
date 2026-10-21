@@ -16,10 +16,10 @@ let seq = 0
 export function freeBytes(dir) {
   try { fs.mkdirSync(dir, { recursive: true }); const s = fs.statfsSync(dir); return Number(s.bavail) * Number(s.bsize) } catch { return Infinity }
 }
-// Tope de descarga: espacio libre menos margen, máximo 10 GB (MAX_DOWNLOAD_BYTES lo puede fijar)
+// Tope de descarga: espacio libre menos margen, máximo 50 GB (MAX_DOWNLOAD_BYTES lo puede fijar)
 export function downloadCap(dir = path.dirname(tmpPath('x'))) {
   const env = Number(process.env.MAX_DOWNLOAD_BYTES)
-  const hard = env > 0 ? env : 10 * 1024 ** 3
+  const hard = env > 0 ? env : 50 * 1024 ** 3
   return Math.max(0, Math.min(hard, freeBytes(dir) - 200 * 1024 * 1024))
 }
 
