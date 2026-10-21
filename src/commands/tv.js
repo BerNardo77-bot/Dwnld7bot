@@ -1,8 +1,9 @@
 // /tv (alias /canal) — TV en vivo: link directo (m3u8/rtmp, como en VLC) o nombre del canal (listas iptv-org).
 // Eliges canal y duración (5-60 min), se graba con ffmpeg y se manda el video (en partes si hace falta).
 import fs from 'fs'
+import { InputFile } from 'grammy'
 import os from 'os'
-import { searchChannels, probeStream, recordStream, isStreamUrl, isDirectStream, chanLine, TV_DURS, TV_MAX_MIN } from '../tv-core.js'
+import { searchChannels, probeStream, recordStream, isStreamUrl, isDirectStream, chanLine, logosFor, TV_DURS, TV_MAX_MIN } from '../tv-core.js'
 import { freeDisk, MAX_TOTAL_BYTES } from '../video-split.js'
 
 export const TV_COMMANDS = ['tv', 'canal', 'canaltv', 'television']
@@ -69,12 +70,20 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
       }
       return offer(ctx, ch)
     }
-    const st = await ctx.reply('🔎 Buscando canales…').catch(() => null)
+    let st = await ctx.reply('🔎 Buscando canales…').catch(() => null)
     let items = []
     try { items = await searchChannels(q, { limit: 10 }) } catch (e) { console.error('[tv]', e?.message || e) }
     const say = (t, extra) => st ? ctx.api.editMessageText(ctx.chat.id, st.message_id, t, extra).catch(() => ctx.reply(t, extra)) : ctx.reply(t, extra)
     if (!items.length) return say(`No encontré canales con "${short(q, 60)}". Prueba otro nombre o agrega el país (ej: /tv antena 3 es), o pega el link directo .m3u8.`)
     lists.set(String(ctx.chat.id), { items, until: Date.now() + 30 * 60 * 1000 })
+    // Logos como en ytsearch (álbum con número y nombre). Si falla, sigue solo con la lista de texto.
+    try {
+      const logos = await logosFor(items, 320)
+      const media = items.map((it, i) => logos[i] ? { type: 'photo', media: new InputFile(logos[i], `canal${i + 1}.jpg`), caption: short(chanLine(it, i), 1000) } : null).filter(Boolean)
+      if (media.length >= 2) await ctx.replyWithMediaGroup(media).catch(async (e) => { console.error('[tv] album', e?.message || e) })
+      else if (media.length === 1) await ctx.replyWithPhoto(media[0].media, { caption: media[0].caption }).catch(() => {})
+      if (media.length && st) { ctx.api.deleteMessage(ctx.chat.id, st.message_id).catch(() => {}); st = null } // la lista va debajo de las fotos
+    } catch (e) { console.error('[tv] logos', e?.message || e) }
     const rows = []
     for (let i = 0; i < items.length; i += 5) rows.push(items.slice(i, i + 5).map((_, j) => ({ text: String(i + j + 1), callback_data: `tvp:${i + j}` })))
     return say(`📺 Canales encontrados:\n${items.map(chanLine).join('\n')}\n\nElige un número.`, { reply_markup: { inline_keyboard: rows } })
