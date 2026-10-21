@@ -869,7 +869,7 @@ bot.command(['eval', 'e', 'restart', 'fix', 'update', 'bots', 'sockets', 'leave'
 
 bot.catch((err) => console.error('Bot error', err?.error || err?.message || err, err?.ctx?.message?.text || ''))
 
-console.log('Dwnld7bot v1.4.32 arrancando...')
+console.log('Dwnld7bot v1.4.33 arrancando...')
 
 async function goOnline() {
   try {
