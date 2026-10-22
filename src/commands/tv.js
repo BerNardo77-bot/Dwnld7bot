@@ -110,6 +110,7 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
     try { const r = await searchLive(q, { limit: 10, pool: 30 }); items = r.items; total = r.total } catch (e) { console.error('[tv]', e?.message || e) }
     const say = (t, extra) => st ? ctx.api.editMessageText(ctx.chat.id, st.message_id, t, extra).catch(() => ctx.reply(t, extra)) : ctx.reply(t, extra)
     if (!items.length && total) return say(`Encontré ${total} canal(es) con "${short(q, 60)}", pero ninguno está al aire ahora (o no responde desde el servidor). Prueba más tarde, otro nombre o el link directo .m3u8.`)
+    if (!items.length && total > 0) return say(`Encontré ${total} canal(es) con "${short(q, 60)}", pero ninguno está transmitiendo ahora (fuera del aire o bloqueado por país). Intenta más tarde, otro nombre, o pega el link directo .m3u8.`)
     if (!items.length) return say(`No encontré canales con "${short(q, 60)}". Prueba otro nombre o agrega el país (ej: /tv antena 3 es), o pega el link directo .m3u8.`)
     lists.set(String(ctx.chat.id), { items, until: Date.now() + 30 * 60 * 1000 })
     // Logos como en ytsearch (álbum con número y nombre). Si falla, sigue solo con la lista de texto.
