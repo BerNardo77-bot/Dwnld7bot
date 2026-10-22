@@ -53,11 +53,11 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
       return typeof v === 'function' ? v.bind(t) : v
     } })
     try {
-      rec = await recordStream(ch.url, min * 60, { headers: ch.headers, title: ch.title, maxBytes, onProgress, signal: ac.signal })
+      rec = await recordStream(ch.url, min * 60, { headers: ch.headers, alts: ch.alts || [], title: ch.title, maxBytes, onProgress, signal: ac.signal })
       if (ac.signal.aborted) throw Object.assign(new Error('cancelado'), { cancelled: true })
       const got = `${Math.floor(rec.seconds / 60)}:${String(rec.seconds % 60).padStart(2, '0')}`
       if (st) await ctx.api.editMessageText(ctx.chat.id, st.message_id, `✅ Grabado ${got} (${mb(rec.size)} MB). Enviando…`, { reply_markup: cancelKb }).catch(() => {})
-      const notes = [rec.seconds < min * 60 - 30 ? `⚠️ La señal se cortó: solo se grabaron ${got}.` : '', rec.cut ? '⚠️ Se detuvo por falta de espacio en el servidor.' : '', rec.reencoded ? 'ℹ️ Se recodificó (la señal no se podía copiar tal cual).' : ''].filter(Boolean)
+      const notes = [rec.seconds < min * 60 - 30 ? `⚠️ La señal se cortó: solo se grabaron ${got}.` : '', rec.cut ? '⚠️ Se detuvo por falta de espacio en el servidor.' : '', rec.reencoded ? 'ℹ️ Se recodificó (la señal no se podía copiar tal cual).' : '', rec.pieces > 1 ? `ℹ️ La señal se reconectó ${rec.pieces - 1} vez/veces; uní todo en un solo video.` : ''].filter(Boolean)
       await sendOrCompress(guarded, rec.file, { kind: 'video', fileName: rec.name, caption: short(`📺 ${ch.title} · ${got}`, 1000), statusId: st?.message_id, fallbackLink: '' })
       if (!ac.signal.aborted && notes.length) await ctx.reply(notes.join('\n')).catch(() => {})
     } catch (e) {
