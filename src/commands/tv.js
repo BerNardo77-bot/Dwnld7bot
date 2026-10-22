@@ -3,7 +3,7 @@
 import fs from 'fs'
 import { InputFile } from 'grammy'
 import os from 'os'
-import { searchChannels, probeStream, recordStream, isStreamUrl, isDirectStream, chanLine, logosFor, TV_DURS, TV_MAX_MIN } from '../tv-core.js'
+import { searchLive, probeStream, recordStream, isStreamUrl, isDirectStream, chanLine, logosFor, TV_DURS, TV_MAX_MIN } from '../tv-core.js'
 import { freeDisk, MAX_TOTAL_BYTES } from '../video-split.js'
 
 export const TV_COMMANDS = ['tv', 'canal', 'canaltv', 'television']
@@ -103,10 +103,12 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
       }
       return offer(ctx, ch)
     }
-    let st = await ctx.reply('🔎 Buscando canales…').catch(() => null)
+    let st = await ctx.reply('🔎 Buscando canales al aire… (reviso cuáles funcionan, tarda unos segundos)').catch(() => null)
     let items = []
-    try { items = await searchChannels(q, { limit: 10 }) } catch (e) { console.error('[tv]', e?.message || e) }
+    let total = 0
+    try { const r = await searchLive(q, { limit: 10, pool: 30 }); items = r.items; total = r.total } catch (e) { console.error('[tv]', e?.message || e) }
     const say = (t, extra) => st ? ctx.api.editMessageText(ctx.chat.id, st.message_id, t, extra).catch(() => ctx.reply(t, extra)) : ctx.reply(t, extra)
+    if (!items.length && total) return say(`Encontré ${total} canal(es) con "${short(q, 60)}", pero ninguno está al aire ahora (o no responde desde el servidor). Prueba más tarde, otro nombre o el link directo .m3u8.`)
     if (!items.length) return say(`No encontré canales con "${short(q, 60)}". Prueba otro nombre o agrega el país (ej: /tv antena 3 es), o pega el link directo .m3u8.`)
     lists.set(String(ctx.chat.id), { items, until: Date.now() + 30 * 60 * 1000 })
     // Logos como en ytsearch (álbum con número y nombre). Si falla, sigue solo con la lista de texto.
@@ -119,7 +121,7 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
     } catch (e) { console.error('[tv] logos', e?.message || e) }
     const rows = []
     for (let i = 0; i < items.length; i += 5) rows.push(items.slice(i, i + 5).map((_, j) => ({ text: String(i + j + 1), callback_data: `tvp:${i + j}` })))
-    return say(`📺 Canales encontrados:\n${items.map(chanLine).join('\n')}\n\nElige un número.`, { reply_markup: { inline_keyboard: rows } })
+    return say(`📺 Canales al aire:\n${items.map(chanLine).join('\n')}\n\nElige un número.`, { reply_markup: { inline_keyboard: rows } })
   }
 
   async function handleMin(ctx) {
