@@ -10,7 +10,7 @@ export const TV_COMMANDS = ['tv', 'canal', 'canaltv', 'television']
 export { isDirectStream }
 const lists = new Map() // chat → { items, until }
 const pending = new Map() // chat → { url, headers, title, until }
-const jobs = new Set()
+const jobs = new Map() // chat → { ac, userId, ch, stId }
 const mb = (b) => (b / 1048576).toFixed(1)
 const short = (s = '', n = 200) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s }
 const label = (m) => m >= 60 && m % 60 === 0 ? `${m / 60} h` : `${m} min`
@@ -26,40 +26,71 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
     return say(`📺 ${short(ch.title, 120)} está al aire${p.height ? ` (${p.height}p)` : ''}${p.video ? '' : ' (solo audio)'}.\n¿Cuántos minutos grabo? (o escribe /tvmin 45 para otro número, máx. 300)`, { reply_markup: durKb() })
   }
 
+  const cancelKb = { inline_keyboard: [[{ text: '❌ Cancelar', callback_data: 'tvx' }]] }
+
   async function grabar(ctx, ch, min) {
     const key = String(ctx.chat.id)
-    if (jobs.has(key)) return ctx.reply('Ya estoy grabando TV en este chat. Espera a que termine.')
+    if (jobs.has(key)) return ctx.reply('Ya estoy grabando TV en este chat. Para cancelar: /tvcancel')
     const dir = os.tmpdir()
     const part = partCap()
     const maxBytes = Math.min(MAX_TOTAL_BYTES, freeDisk(dir) - 300 * 1024 * 1024 - part)
     if (maxBytes < 20 * 1024 * 1024) return ctx.reply('No hay espacio libre en el servidor para grabar ahora. Intenta más tarde.')
-    jobs.add(key)
-    const st = await ctx.reply(`⏺ Grabando ${min} min de ${short(ch.title, 80)}… te aviso al terminar.`).catch(() => null)
+    const ac = new AbortController()
+    const job = { ac, userId: ctx.from?.id, ch, stId: null }
+    jobs.set(key, job)
+    const st = await ctx.reply(`⏺ Grabando ${label(min)} de ${short(ch.title, 80)}… te aviso al terminar.\nPara cancelar: botón ❌ o /tvcancel`, { reply_markup: cancelKb }).catch(() => null)
+    job.stId = st?.message_id || null
     let last = 0, rec = null
     const onProgress = (s, b) => {
-      if (!st || Date.now() - last < 30000) return
+      if (!st || ac.signal.aborted || Date.now() - last < 30000) return
       last = Date.now()
-      ctx.api.editMessageText(ctx.chat.id, st.message_id, `⏺ Grabando ${short(ch.title, 60)}: ${Math.min(min, Math.floor(s / 60))}/${min} min · ${mb(b)} MB`).catch(() => {})
+      ctx.api.editMessageText(ctx.chat.id, st.message_id, `⏺ Grabando ${short(ch.title, 60)}: ${Math.min(min, Math.floor(s / 60))}/${min} min · ${mb(b)} MB\nPara cancelar: botón ❌ o /tvcancel`, { reply_markup: cancelKb }).catch(() => {})
     }
+    // Si se cancela mientras se envía, este ctx deja de mandar archivos (no salen más partes)
+    const guarded = new Proxy(ctx, { get(t, prop) {
+      const v = Reflect.get(t, prop)
+      if (typeof prop === 'string' && /^replyWith(Video|Document|Audio|Photo|MediaGroup)$/.test(prop)) return (...a) => { if (ac.signal.aborted) throw Object.assign(new Error('cancelado'), { cancelled: true }); return v.apply(t, a) }
+      return typeof v === 'function' ? v.bind(t) : v
+    } })
     try {
-      rec = await recordStream(ch.url, min * 60, { headers: ch.headers, title: ch.title, maxBytes, onProgress })
+      rec = await recordStream(ch.url, min * 60, { headers: ch.headers, title: ch.title, maxBytes, onProgress, signal: ac.signal })
+      if (ac.signal.aborted) throw Object.assign(new Error('cancelado'), { cancelled: true })
       const got = `${Math.floor(rec.seconds / 60)}:${String(rec.seconds % 60).padStart(2, '0')}`
-      if (st) await ctx.api.editMessageText(ctx.chat.id, st.message_id, `✅ Grabado ${got} (${mb(rec.size)} MB). Enviando…`).catch(() => {})
+      if (st) await ctx.api.editMessageText(ctx.chat.id, st.message_id, `✅ Grabado ${got} (${mb(rec.size)} MB). Enviando…`, { reply_markup: cancelKb }).catch(() => {})
       const notes = [rec.seconds < min * 60 - 30 ? `⚠️ La señal se cortó: solo se grabaron ${got}.` : '', rec.cut ? '⚠️ Se detuvo por falta de espacio en el servidor.' : '', rec.reencoded ? 'ℹ️ Se recodificó (la señal no se podía copiar tal cual).' : ''].filter(Boolean)
-      await sendOrCompress(ctx, rec.file, { kind: 'video', fileName: rec.name, caption: short(`📺 ${ch.title} · ${got}`, 1000), statusId: st?.message_id, fallbackLink: '' })
-      if (notes.length) await ctx.reply(notes.join('\n')).catch(() => {})
+      await sendOrCompress(guarded, rec.file, { kind: 'video', fileName: rec.name, caption: short(`📺 ${ch.title} · ${got}`, 1000), statusId: st?.message_id, fallbackLink: '' })
+      if (!ac.signal.aborted && notes.length) await ctx.reply(notes.join('\n')).catch(() => {})
     } catch (e) {
-      if (st) ctx.api.deleteMessage(ctx.chat.id, st.message_id).catch(() => {})
-      await ctx.reply('❌ No pude grabar: ' + short(e?.message || e, 300)).catch(() => {})
+      if (!(e?.cancelled || ac.signal.aborted)) {
+        if (st) ctx.api.deleteMessage(ctx.chat.id, st.message_id).catch(() => {})
+        await ctx.reply('❌ No pude grabar: ' + short(e?.message || e, 300)).catch(() => {})
+      }
     } finally {
-      if (rec?.dir) fs.rmSync(rec.dir, { recursive: true, force: true })
-      jobs.delete(key)
+      if (rec?.dir) try { fs.rmSync(rec.dir, { recursive: true, force: true }) } catch {}
+      if (jobs.get(key) === job) jobs.delete(key)
     }
+  }
+
+  // Cancela: solo quien la empezó o un admin del grupo. Vuelve a mostrar el menú de duración del mismo canal.
+  async function cancel(ctx) {
+    const key = String(ctx.chat?.id)
+    const job = jobs.get(key)
+    if (!job) return ctx.reply('No hay ninguna grabación de TV en curso en este chat.').catch(() => {})
+    let allowed = !job.userId || ctx.from?.id === job.userId
+    if (!allowed && ctx.chat?.type !== 'private') {
+      try { const m = await ctx.getChatMember(ctx.from.id); allowed = ['creator', 'administrator'].includes(m.status) } catch {}
+    }
+    if (!allowed) return ctx.reply('Solo quien empezó la grabación (o un admin) puede cancelarla.').catch(() => {})
+    job.ac.abort()
+    jobs.delete(key)
+    if (job.stId) ctx.api.editMessageText(ctx.chat.id, job.stId, '⏹ Grabación cancelada.').catch(() => {})
+    pending.set(key, { ...job.ch, until: Date.now() + 30 * 60 * 1000 })
+    return ctx.reply(`⏹ Grabación cancelada. No se mandó nada y se borraron los archivos.\n\n⏺ ¿Cuánto grabo de ${short(job.ch.title, 100)}? (o /tvmin 45 para otro número, máx. ${TV_MAX_MIN})`, { reply_markup: durKb() }).catch(() => {})
   }
 
   async function handle(ctx) {
     const q = String(ctx.message?.text || '').replace(/^\/\S+\s*/, '').trim()
-    if (!q) return ctx.reply('📺 Uso:\n/tv <nombre del canal> — busca en las listas públicas (iptv-org). Ej: /tv milenio · /tv canal 22 · /tv antena 3 es\n/tv <link> — link directo .m3u8, http o rtmp (como en VLC)\nLuego eliges canal y minutos (5 a 300 = 5 horas; /tvmin <min> para otro número) y te mando el video.\nCon link puedes poner los minutos: /tv <link> 120')
+    if (!q) return ctx.reply('📺 Uso:\n/tv <nombre del canal> — busca en las listas públicas (iptv-org). Ej: /tv milenio · /tv canal 22 · /tv antena 3 es\n/tv <link> — link directo .m3u8, http o rtmp (como en VLC)\nLuego eliges canal y minutos (5 a 300 = 5 horas; /tvmin <min> para otro número) y te mando el video. Cancelar: /tvcancel\nCon link puedes poner los minutos: /tv <link> 120')
     const [first, ...rest] = q.split(/\s+/)
     if (isStreamUrl(first)) {
       const min = Number((rest.join(' ').match(/^(\d{1,3})/) || [])[1]) || 0
@@ -101,6 +132,8 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
 
   function register(bot) {
     bot.command(['tvmin', 'tvminutos'], (ctx) => handleMin(ctx))
+    bot.command(['tvcancel', 'tvcancelar', 'cancelartv'], (ctx) => cancel(ctx))
+    bot.callbackQuery('tvx', async (ctx) => { await ctx.answerCallbackQuery().catch(() => {}); return cancel(ctx) })
     bot.callbackQuery(/^tvp:(\d+)$/, async (ctx) => {
       await ctx.answerCallbackQuery().catch(() => {})
       const l = lists.get(String(ctx.chat?.id))
