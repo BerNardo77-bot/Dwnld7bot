@@ -1,6 +1,6 @@
 {
   "name": "dwnld7bot",
-  "version": "1.4.37",
+  "version": "1.4.38",
   "private": true,
   "description": "Dwnld7bot (@Dwnld7ds_bot): bot de Telegram para Termux — descargas (YouTube, TikTok, X, IG, FB, podcasts), búsqueda, PDF, juegos. Basado en bbboy v1.5.33.",
   "type": "module",
