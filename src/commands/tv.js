@@ -13,7 +13,8 @@ const pending = new Map() // chat → { url, headers, title, until }
 const jobs = new Set()
 const mb = (b) => (b / 1048576).toFixed(1)
 const short = (s = '', n = 200) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s }
-const durKb = () => ({ inline_keyboard: [TV_DURS.map(m => ({ text: `⏺ ${m} min`, callback_data: `tvd:${m}` }))] })
+const label = (m) => m >= 60 && m % 60 === 0 ? `${m / 60} h` : `${m} min`
+const durKb = () => ({ inline_keyboard: [TV_DURS.slice(0, 5), TV_DURS.slice(5)].map(row => row.map(m => ({ text: `⏺ ${label(m)}`, callback_data: `tvd:${m}` }))) })
 
 export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 1024 } = {}) {
   async function offer(ctx, ch) {
@@ -22,7 +23,7 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
     const p = await probeStream(ch.url, ch.headers)
     if (!p.ok) return say(`❌ ${short(ch.title, 80)}: ${p.reason}`)
     pending.set(String(ctx.chat.id), { ...ch, until: Date.now() + 30 * 60 * 1000 })
-    return say(`📺 ${short(ch.title, 120)} está al aire${p.height ? ` (${p.height}p)` : ''}${p.video ? '' : ' (solo audio)'}.\n¿Cuántos minutos grabo?`, { reply_markup: durKb() })
+    return say(`📺 ${short(ch.title, 120)} está al aire${p.height ? ` (${p.height}p)` : ''}${p.video ? '' : ' (solo audio)'}.\n¿Cuántos minutos grabo? (o escribe /tvmin 45 para otro número, máx. 300)`, { reply_markup: durKb() })
   }
 
   async function grabar(ctx, ch, min) {
@@ -58,7 +59,7 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
 
   async function handle(ctx) {
     const q = String(ctx.message?.text || '').replace(/^\/\S+\s*/, '').trim()
-    if (!q) return ctx.reply('📺 Uso:\n/tv <nombre del canal> — busca en las listas públicas (iptv-org). Ej: /tv milenio · /tv canal 22 · /tv antena 3 es\n/tv <link> — link directo .m3u8, http o rtmp (como en VLC)\nLuego eliges canal y minutos (5, 10, 15, 30 o 60) y te mando el video.')
+    if (!q) return ctx.reply('📺 Uso:\n/tv <nombre del canal> — busca en las listas públicas (iptv-org). Ej: /tv milenio · /tv canal 22 · /tv antena 3 es\n/tv <link> — link directo .m3u8, http o rtmp (como en VLC)\nLuego eliges canal y minutos (5 a 300 = 5 horas; /tvmin <min> para otro número) y te mando el video.\nCon link puedes poner los minutos: /tv <link> 120')
     const [first, ...rest] = q.split(/\s+/)
     if (isStreamUrl(first)) {
       const min = Number((rest.join(' ').match(/^(\d{1,3})/) || [])[1]) || 0
@@ -66,7 +67,8 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
       if (min) {
         const p = await probeStream(first)
         if (!p.ok) return ctx.reply('❌ ' + p.reason)
-        return grabar(ctx, ch, Math.min(min, TV_MAX_MIN))
+        grabar(ctx, ch, Math.min(min, TV_MAX_MIN)).catch(() => {}) // sin await: grammy procesa en orden y no debe quedarse bloqueado horas
+        return
       }
       return offer(ctx, ch)
     }
@@ -89,7 +91,16 @@ export function createTvHandler(sendOrCompress, { partCap = () => 49 * 1024 * 10
     return say(`📺 Canales encontrados:\n${items.map(chanLine).join('\n')}\n\nElige un número.`, { reply_markup: { inline_keyboard: rows } })
   }
 
+  async function handleMin(ctx) {
+    const n = Number(String(ctx.message?.text || '').replace(/^\/\S+\s*/, '').trim())
+    const ch = pending.get(String(ctx.chat?.id))
+    if (!ch || Date.now() > ch.until) return ctx.reply('Primero elige un canal con /tv <canal> o /tv <link>.')
+    if (!Number.isFinite(n) || n < 1 || n > TV_MAX_MIN) return ctx.reply(`Escribe los minutos de 1 a ${TV_MAX_MIN}. Ej: /tvmin 45`)
+    grabar(ctx, ch, Math.round(n)).catch(() => {})
+  }
+
   function register(bot) {
+    bot.command(['tvmin', 'tvminutos'], (ctx) => handleMin(ctx))
     bot.callbackQuery(/^tvp:(\d+)$/, async (ctx) => {
       await ctx.answerCallbackQuery().catch(() => {})
       const l = lists.get(String(ctx.chat?.id))

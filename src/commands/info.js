@@ -105,7 +105,7 @@ Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con 
 /space — grabación de un Space de X (link x.com/i/spaces/…) en MP3; en partes si es muy largo
 /mapa /maps /ubicacion — ubicación en el mapa (lugar, lat,lon o link de Google Maps) + link de Google Maps
 /envivo /envivos /live — en vivo de YouTube (link o @canal) o TikTok (tiktok @usuario o link): link directo para VLC + grabar 5-30 min en MP3
-/tv /canal — TV en vivo: /tv <canal> (busca en listas públicas iptv-org, ej. /tv milenio · /tv antena 3 es) o /tv <link .m3u8/rtmp>; eliges canal y graba 5/10/15/30/60 min en video
+/tv /canal — TV en vivo: /tv <canal> (busca en listas públicas iptv-org, ej. /tv milenio · /tv antena 3 es) o /tv <link .m3u8/rtmp>; eliges canal y graba de 5 min a 5 horas en video (/tvmin <min> para otro número)
 
 🎭 Anime (responde a alguien para apuntar)
 /hug /abrazo /kiss /muak /beso /pat /slap /dance /baile /cry
