@@ -131,7 +131,20 @@ function probe(file) {
 }
 
 // Manda un archivo grande. kind: 'video' | 'audio' | 'document'
-export async function sendBigFile(chatId, filePath, { kind = 'document', caption = '', fileName, replyToMsgId, onProgress } = {}) {
+// Subida con vigilante: si no avanza en 120 s (p. ej. "sender already has some hanging states" tras un corte
+// de red), se corta, se reconecta y se reintenta 1 vez; si vuelve a trabarse, falla y el bot manda en partes de 49 MB.
+const STALL_MS = 120000
+export async function sendBigFile(chatId, filePath, opts = {}) {
+  for (let i = 0; i < 2; i++) {
+    try { return await sendBigOnce(chatId, filePath, opts) } catch (e) {
+      console.error(`[mtproto] subida ${i + 1}/2 falló:`, e?.message || e)
+      if (i === 1 || !e?.stalled) throw e
+      try { await Promise.race([client.disconnect(), new Promise(r => setTimeout(r, 10000))]) } catch {}
+      await new Promise(r => setTimeout(r, 5000))
+    }
+  }
+}
+async function sendBigOnce(chatId, filePath, { kind = 'document', caption = '', fileName, replyToMsgId, onProgress } = {}) {
   await ensureConnected()
   const peer = await resolvePeer(chatId, replyToMsgId)
   const name = fileName || path.basename(filePath)
@@ -140,13 +153,22 @@ export async function sendBigFile(chatId, filePath, { kind = 'document', caption
     const m = probe(filePath)
     attributes.push(new Api.DocumentAttributeVideo({ duration: m.duration, w: m.w, h: m.h, supportsStreaming: true }))
   }
-  return client.sendFile(peer, {
+  let lastP = -1, lastT = Date.now(), timer
+  const stall = new Promise((_, rej) => {
+    timer = setInterval(() => {
+      if (Date.now() - lastT > STALL_MS) { const e = new Error(`la subida no avanzó en ${STALL_MS / 1000} s`); e.stalled = true; rej(e) }
+    }, 5000)
+  })
+  console.log(`[mtproto] subiendo ${path.basename(filePath)}…`)
+  const up = client.sendFile(peer, {
     file: filePath,
     caption: String(caption || '').slice(0, 1024),
     forceDocument: kind === 'document',
     supportsStreaming: kind === 'video',
     attributes: kind === 'audio' ? undefined : attributes,
     workers: 2, // poco consumo en celulares de pocos recursos
-    progressCallback: onProgress ? (p) => { try { onProgress(Number(p)) } catch {} } : undefined
+    progressCallback: (p) => { p = Number(p); if (p > lastP) { lastP = p; lastT = Date.now() } if (onProgress) try { onProgress(p) } catch {} }
   })
+  up.catch(() => {})
+  try { const r = await Promise.race([up, stall]); console.log('[mtproto] subida lista'); return r } finally { clearInterval(timer) }
 }
