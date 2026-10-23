@@ -31,6 +31,7 @@ import {
 import { handleSticker, handlePhotoCaption } from './commands/stickers.js'
 import { handleHelp, handlePing } from './commands/info.js'
 import { handleGrokStickers } from './commands/grokstickers.js'
+import { handleGrokGifs } from './commands/grokgifs.js'
 import { handleTranslate, TRANSLATE_COMMANDS } from './commands/translate.js'
 import { createDownloadHandlers } from './commands/downloads.js'
 import { handleGoogle, GOOGLE_COMMANDS } from './commands/google.js'
@@ -728,6 +729,7 @@ bot.command(['ping', 'p'], handlePing)
 bot.command(TRANSLATE_COMMANDS, handleTranslate) // texto o traducción por voz (responder a nota de voz/audio)
 bot.command(['sticker', 's'], handleSticker)
 bot.command(['stickers', 'grokstickers'], handleGrokStickers)
+bot.command(['gifs', 'grokgifs'], handleGrokGifs)
 bot.on('message:photo', async (ctx, next) => {
   const cap = String(ctx.message?.caption || '')
   const cmd = cap.split(/\s+/)[0].split('@')[0].toLowerCase()
