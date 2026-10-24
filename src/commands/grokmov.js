@@ -1,4 +1,4 @@
-// /movimientos — envía los 12 movimientos de Grok Bot (sticker .webm + GIF con su gesto).
+// /movimientos — envía los 17 movimientos de Grok Bot (sticker .webm + GIF con su gesto).
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -19,6 +19,11 @@ const ITEMS = [
   ['10_nervioso', "Nervioso"],
   ['11_triste', "Triste"],
   ['12_guino', "¡Guiño!"],
+  ['13_entrecerrar', "Entrecerrando los ojos"],
+  ['14_lado_a_lado', "De lado a lado"],
+  ['15_latido', "Latiendo"],
+  ['16_brincando', "Brincando"],
+  ['17_vueltas', "Dando vueltas"],
 ]
 
 export async function handleGrokMovimientos(ctx) {
