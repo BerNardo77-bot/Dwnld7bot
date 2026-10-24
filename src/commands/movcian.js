@@ -1,4 +1,5 @@
 // /movcian — envía los 10 movimientos de Grok Bot en cian (sticker .webm + GIF con su gesto).
+// "/movcian x" manda cada uno como GIF listo para X (documento); "/movcian N" solo ese.
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -21,7 +22,16 @@ const ITEMS = [
 
 export async function handleGrokMovCian(ctx) {
   if (!fs.existsSync(DIR)) return ctx.reply('No encontré los movimientos.').catch(() => {})
-  for (const [f, caption] of ITEMS) {
+  const a = (ctx.match || '').toString().toLowerCase().split(/\s+/)
+  const x = a.includes('x')
+  const n = parseInt(a.find((s) => /^\d+$/.test(s)), 10)
+  const list = n >= 1 && n <= ITEMS.length ? [ITEMS[n - 1]] : ITEMS
+  for (const [f, caption] of list) {
+    if (x) {
+      try { await ctx.replyWithDocument(new InputFile(path.join(DIR, f + '_x.gif'), 'grokbot_cian_' + f + '.gif'), { caption }) } catch (e) { console.error('[movcian]', f, e?.message) }
+      await sleep(700)
+      continue
+    }
     try { await ctx.replyWithSticker(new InputFile(path.join(DIR, f + '.webm'), f + '.webm')) } catch (e) { console.error('[movcian]', f, e?.message) }
     await sleep(500)
     try { await ctx.replyWithAnimation(new InputFile(path.join(DIR, f + '.mp4'), f + '.mp4'), { caption }) } catch (e) { console.error('[movcian]', f, e?.message) }
