@@ -37,8 +37,8 @@ Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con 
 /movimientos — los 22 movimientos de Grok Bot (sticker + GIF con su gesto)
 /movcian — los 22 movimientos de Grok Bot en cian (sticker + GIF con su gesto)
 /movcolor <color> — los 22 movimientos de Grok Bot en café, rojo, naranja, amarillo, verde, gris, rosa, morado o azul
-/movnube [x] — los 22 movimientos de Grok Bot en forma de nube azul (x = GIFs para X)
-/movcuadro [x] — los 22 movimientos de Grok Bot en forma de cuadro azul (x = GIFs para X)
+/movnube [x] — los 8 movimientos de Grok Bot (del video) en forma de nube azul (x = GIFs para X)
+/movcuadro [x] — los 8 movimientos de Grok Bot (del video) en forma de cuadro azul (x = GIFs para X)
 /movcalabaza [x] — los 9 movimientos de la calabaza naranja de Grok Bot (x = GIFs para X)
 
 🔍 Utilidades
