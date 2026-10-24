@@ -129,9 +129,21 @@ Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con 
 Uptime: ${'{uptime}'}
 `
 
+export function splitMenu(text, max = 3900) {
+  const parts = []
+  let cur = ''
+  for (const line of text.split('\n')) {
+    if (cur && cur.length + line.length + 1 > max) { parts.push(cur); cur = '' }
+    cur += (cur ? '\n' : '') + line
+  }
+  if (cur.trim()) parts.push(cur)
+  return parts
+}
+
 export async function handleHelp(ctx) {
   try {
-    await ctx.reply(helpText.replace('{uptime}', uptimeStr()))
+    // Telegram limita cada mensaje a 4096 caracteres: el menú se manda en partes por líneas.
+    for (const part of splitMenu(helpText.replace('{uptime}', uptimeStr()))) await ctx.reply(part)
   } catch (e) {
     console.error('[menu]', e)
     await ctx.reply('Menu listo. Prueba /ping. Si no responde, cierra otros procesos del bot.').catch(() => {})
