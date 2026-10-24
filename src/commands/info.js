@@ -34,8 +34,8 @@ Todas en alta calidad. Si pesa más que el tope de envío (49 MB, o ~1.9 GB con 
 /sticker /s — responde a una foto, o envía foto con caption /sticker
 /stickers — los 8 stickers de Grok Bot
 /gifs — los 8 GIFs animados de Grok Bot
-/movimientos — los 19 movimientos de Grok Bot (sticker + GIF con su gesto)
-/movcian — los 19 movimientos de Grok Bot en cian (sticker + GIF con su gesto)
+/movimientos — los 20 movimientos de Grok Bot (sticker + GIF con su gesto)
+/movcian — los 20 movimientos de Grok Bot en cian (sticker + GIF con su gesto)
 
 🔍 Utilidades
 /traducir /traduce /tr /translate — traduce texto (ej: /traducir en Hola) o 🎙️🖼️ responde a una nota de voz/audio o a una foto/captura: te mando el texto, la traducción, cómo se pronuncia y la voz (/tr = español→inglés u otro→español · /tr ja · /tr fr · /tr pt>es) · audio de hasta 5 horas (te marco el avance; si es muy largo te llega en .txt)
