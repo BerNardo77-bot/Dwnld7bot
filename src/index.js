@@ -36,6 +36,7 @@ import { handleGrokMovimientos } from './commands/grokmov.js'
 import { handleGrokMovCian } from './commands/movcian.js'
 import { handleGrokMovColor } from './commands/movcolor.js'
 import { handleGrokMovNube, handleGrokMovCuadro } from './commands/movforma.js'
+import { handleGrokMovCalabaza } from './commands/movcalabaza.js'
 import { handleTranslate, TRANSLATE_COMMANDS } from './commands/translate.js'
 import { createDownloadHandlers } from './commands/downloads.js'
 import { handleGoogle, GOOGLE_COMMANDS } from './commands/google.js'
@@ -739,6 +740,7 @@ bot.command(['movcian', 'movimientoscian'], handleGrokMovCian)
 bot.command(['movcolor', 'movimientoscolor', 'colorbot'], handleGrokMovColor)
 bot.command(['movnube', 'movimientosnube'], handleGrokMovNube)
 bot.command(['movcuadro', 'movimientoscuadro'], handleGrokMovCuadro)
+bot.command(['movcalabaza', 'movimientoscalabaza'], handleGrokMovCalabaza)
 bot.on('message:photo', async (ctx, next) => {
   const cap = String(ctx.message?.caption || '')
   const cmd = cap.split(/\s+/)[0].split('@')[0].toLowerCase()
