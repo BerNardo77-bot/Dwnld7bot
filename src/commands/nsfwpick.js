@@ -5,6 +5,7 @@ import fs from 'fs'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { resolveYtDlpBin, errText, isNsfwEnabled, tmpPath, safeUnlink, mb, argText } from '../api.js'
+import { setReplay } from '../dl-control.js'
 
 const run = promisify(execFile)
 const MAX = 10
@@ -149,6 +150,7 @@ export function createNsfwPicker({ sendOrCompress, maxSend }) {
     if (!Number.isInteger(n) || n < 1 || n > hit.items.length) { await ctx.reply(`Elige un número del 1 al ${hit.items.length}.`); return true }
     picks.delete(k)
     const it = hit.items[n - 1]
+    setReplay(`/${hit.site} ${it.url}`) // repetir tras un reinicio
     await descargar(ctx, hit.site, it.url, it.title)
     return true
   }

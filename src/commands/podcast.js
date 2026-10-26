@@ -3,6 +3,7 @@
 import fs from 'fs'
 import { InputFile } from 'grammy'
 import { downloadToFile, tmpPath, safeUnlink, mb, errText } from '../api.js'
+import { setReplay } from '../dl-control.js'
 
 const MAX_EP = 10
 const PICK_MS = 5 * 60 * 1000
@@ -292,6 +293,7 @@ export function createPodcastHandlers({ maxSend }) {
     if (!hit || hit.until < Date.now()) { picks.delete(pickKey(ctx)); return false }
     if (!Number.isInteger(n) || n < 1 || n > hit.items.length) { await ctx.reply(`Elige un número del 1 al ${hit.items.length}.`); return true }
     picks.delete(pickKey(ctx))
+    if (hit.items[n - 1]?.url) setReplay(`/pod ${hit.items[n - 1].url}`) // repetir tras un reinicio
     await descargar(ctx, hit.items[n - 1])
     return true
   }

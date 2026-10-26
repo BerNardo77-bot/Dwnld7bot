@@ -5,3 +5,4 @@ tmp-dl/
 data/store.json
 data/.telegram-local-logout.json
 data/.mtproto-session
+data/pending-downloads.json*

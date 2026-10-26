@@ -81,6 +81,7 @@ import {
   handleSetGpDesc, handleOpen, handleCloset, handleHidetag, handleClear, handlePfp,
   waOnly, onNewMember, onLeftMember
 } from './commands/world.js'
+import { setReplay } from './dl-control.js'
 import {
   handleIa,
   handleGemini,
@@ -715,7 +716,8 @@ async function handleVideoHd(ctx) {
   return handleVideo(ctx, 'hd')
 }
 
-const ytPicker = createYtPicker({ onPick: (ctx, url, quality) => handleVideo(ctx, quality, url) })
+// setReplay: si el bot se reinicia a media descarga, se repite como /ytvideo <link>
+const ytPicker = createYtPicker({ onPick: (ctx, url, quality) => { if (quality === 'hd') setReplay(`/ytvideo ${url}`); return handleVideo(ctx, quality, url) } })
 const handleXnxx = createXnxxHandler(sendOrCompress)
 const handlePdf = createPdfHandler({ maxSend: MAX_SEND })
 const handleX = createXHandler(sendOrCompress, { maxSend: MAX_SEND })
@@ -726,7 +728,7 @@ registerMapa(bot) // /mapa: número/botón solo si la lista más reciente es de 
 registerEnvivo(bot)
 const tvBot = createTvHandler(sendOrCompress, { partCap: () => SEND_CAP })
 tvBot.register(bot)
-setVideoHandler((ctx, url) => handleVideo(ctx, 'hd', url))
+setVideoHandler((ctx, url) => { setReplay(`/ytvideo ${url}`); return handleVideo(ctx, 'hd', url) })
 createPodcastHandlers({ maxSend: MAX_SEND }).register(bot)
 ytPicker.register(bot)
 setYtSearchPicker((ctx, list) => ytPicker.remember(ctx, list, { quality: 'hd' }))
