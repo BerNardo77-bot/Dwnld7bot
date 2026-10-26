@@ -1,3 +1,5 @@
+// Debe ser el primer import: registra los procesos de descarga para poder cancelar/pausar
+import { installDlControl } from './dl-control-tg.js'
 import path from 'path'
 import { initMtproto, sendBigFile, MTPROTO_MAX_SEND } from './mtproto.js'
 import { splitVideoEach, hasRoomToSplitEach, roomText, freeDisk, MAX_SPLIT_PARTS, partsFor, bigWarning } from './video-split.js'
@@ -159,6 +161,8 @@ const botOpts = useLocalApi
   : undefined
 
 const bot = new Bot(token, botOpts)
+// ❌ Cancelar / ⏸️ Pausar / ▶️ Continuar descargas (debe ir antes de cualquier otro middleware)
+installDlControl(bot)
 
 bot.use(async (ctx, next) => {
   try {
