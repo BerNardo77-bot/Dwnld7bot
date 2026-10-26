@@ -2,7 +2,11 @@
 // más /cancelar, /pausar y /continuar. Solo quien inició la descarga puede usarlos.
 // Importante: las actualizaciones se procesan sin esperar a que termine la anterior, si no
 // el botón no llegaría hasta que acabara la descarga.
-import { runJob, currentJob, getJob, activeJobs, cancelJob, pauseJob, resumeJob, outsideJob, PAUSE_MAX_MS } from './dl-control.js'
+import path from 'path'
+import { runJob, currentJob, getJob, activeJobs, cancelJob, pauseJob, resumeJob, outsideJob, PAUSE_MAX_MS, configurePending, takePending, markDownload, touchJob, isShuttingDown, RESTART_TEXT, noRestartText } from './dl-control.js'
+
+// Pendientes en DATA_DIR (volumen persistente si existe) o ./data (Termux/local: sobrevive; nube sin volumen: no)
+const PENDING_FILE = path.join(String(process.env.DATA_DIR || '').trim() ? path.resolve(process.env.DATA_DIR.trim()) : path.join(process.cwd(), 'data'), 'pending-downloads.json')
 
 const PROGRESS_RE = /Bajando|Descargando|Grabando|Convirtiendo|\b\d{1,3}(?:[.,]\d+)?\s?%/i
 const EDIT_METHODS = new Set(['editMessageText'])
@@ -25,6 +29,14 @@ function isControlText(text) {
 }
 
 export function installDlControl(bot) {
+  configurePending(PENDING_FILE)
+  // Al arrancar: avisar y volver a empezar las descargas que se cortaron por un reinicio
+  const t = setInterval(() => {
+    if (!bot.isInited()) return
+    clearInterval(t)
+    resumePending(bot).catch((e) => console.error('[dl-resume]', e?.message || e))
+  }, 1500)
+  t.unref?.()
   const editStatus = (job) => outsideJob(async () => {
     const s = job.status
     if (!s) return
@@ -43,7 +55,7 @@ export function installDlControl(bot) {
   bot.api.config.use(async (prev, method, payload, signal) => {
     const job = currentJob()
     if (!job || job.skip) return prev(method, payload, signal)
-    if (job.state === 'cancelled') {
+    if (job.state === 'cancelled' || isShuttingDown()) {
       // ya se avisó "Descarga cancelada"; no mandar errores ni archivos a medias
       return { ok: true, result: method.startsWith('send') ? { message_id: 0, date: 0, chat: { id: payload?.chat_id || 0 } } : true }
     }
@@ -58,9 +70,11 @@ export function installDlControl(bot) {
     }
     const res = await prev(method, payload, signal)
     if (isProgress && res?.ok) {
+      markDownload(job)
       const r = res.result
       if (SEND_METHODS.has(method) && r?.message_id) job.status = { chat_id: r.chat?.id ?? payload.chat_id, message_id: r.message_id, text }
       else if (EDIT_METHODS.has(method)) job.status = { chat_id: payload.chat_id, message_id: payload.message_id, text }
+      touchJob(job)
     }
     if (method === 'deleteMessage' && job.status && payload.message_id === job.status.message_id) job.status = null
     return res
@@ -102,9 +116,44 @@ export function installDlControl(bot) {
     }
     const text = String(ctx.message?.text || '')
     const skip = /^\/(tv|canal|canaltv|television|tvmin|tvminutos|tvcancel|tvcancelar|cancelartv)\b/i.test(text) || /^tv[a-z]?(:|$)/.test(data)
-    const task = runJob({ user: ctx.from?.id, chat: ctx.chat?.id, skip }, () => next())
+    const msgText = ctx.message?.text || ''
+    const replay = /^\/|https?:\/\//i.test(msgText.trim()) ? msgText.trim() : null
+    const meta = ctx.from && ctx.chat ? { chatType: ctx.chat.type, firstName: ctx.from.first_name || '', msgId: ctx.message?.message_id || ctx.callbackQuery?.message?.message_id || 0 } : null
+    const task = runJob({ user: ctx.from?.id, chat: ctx.chat?.id, skip, replay, meta, restarts: ctx.update?.__dlRestarts }, () => next())
     task.catch((e) => {
       console.error('[handler]', e?.error || e?.message || e)
     })
   })
+}
+
+async function resumePending(bot) {
+  const list = takePending()
+  if (!list.length) return
+  console.log(`[dl-resume] ${list.length} descarga(s) cortadas por reinicio`)
+  for (const e of list) {
+    const text = e.ok ? RESTART_TEXT : noRestartText(e.reason)
+    let edited = false
+    if (e.status?.message_id) {
+      try { await bot.api.editMessageText(e.status.chat_id, e.status.message_id, text); edited = true } catch {}
+    }
+    if (!edited) {
+      try { await bot.api.sendMessage(e.chat, text, e.meta?.msgId ? { reply_parameters: { message_id: e.meta.msgId, allow_sending_without_reply: true } } : {}) } catch (err) { console.error('[dl-resume] aviso', err?.description || err?.message) }
+    }
+    if (!e.ok) continue
+    const cmdLen = e.replay.startsWith('/') ? e.replay.split(/\s/)[0].length : 0
+    const update = {
+      update_id: 0,
+      message: {
+        message_id: e.meta?.msgId || 0,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: Number(e.chat), type: e.meta?.chatType || 'private' },
+        from: { id: Number(e.user), is_bot: false, first_name: e.meta?.firstName || 'Usuario' },
+        text: e.replay,
+        ...(cmdLen ? { entities: [{ type: 'bot_command', offset: 0, length: cmdLen }] } : {})
+      }
+    }
+    Object.defineProperty(update, '__dlRestarts', { value: (e.restarts || 0) + 1, enumerable: false })
+    console.log(`[dl-resume] repitiendo para ${e.user}: ${e.replay.slice(0, 80)} (reinicio ${(e.restarts || 0) + 1})`)
+    await bot.handleUpdate(update).catch((err) => console.error('[dl-resume] repetir', err?.message || err))
+  }
 }

@@ -9,6 +9,7 @@ import { InputFile } from 'grammy'
 import { musicKind, resolveTrack, resolveAlbum, searchQuery, searchItunes, pageMusicQuery, strongAlbum } from '../music-page.js'
 import { youtubeCover, prepareAudio, fetchCover, makeThumb, probeAudio, haveFfmpeg } from '../audio-tags.js'
 import { resolveYoutube, getAudioLink, downloadToFile, tmpPath, safeUnlink, errText, resolveYtDlpBin, ytCookiesFile, extractYoutubeId, sendLimit } from '../api.js'
+import { setReplay } from '../dl-control.js'
 
 const run = promisify(execFile)
 const PICK_MS = 5 * 60 * 1000
@@ -46,6 +47,7 @@ async function ytdlpAudio(url) {
  * y lo manda con sendAudio (título, intérprete, miniatura, nombre "Artista - Título.mp3").
  */
 export async function playAudio(ctx, { query = '', url = '', meta = null, quiet = false } = {}) {
+  if (!quiet && (url || query)) setReplay(`/play ${url || query}`) // repetir tras un reinicio
   const status = quiet ? null : await ctx.reply('🎵 Buscando audio...').catch(() => null)
   const say = (t) => quiet ? (console.error('[music] (todas)', String(t).slice(0, 150)), false) : status ? ctx.api.editMessageText(ctx.chat.id, status.message_id, t).catch(() => {}) : ctx.reply(t).catch(() => {})
   const out = tmpPath(`${Date.now()}-api-audio`)
