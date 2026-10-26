@@ -3,6 +3,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import yts from 'yt-search'
+import { searchYoutubeMx } from '../yt-search-mx.js'
 import { resolveYtDlpBin, errText, ytCookiesFile } from '../api.js'
 
 const run = promisify(execFile)
@@ -11,11 +12,24 @@ const PICK_MS = 5 * 60 * 1000
 const picks = new Map()
 
 const fmtDur = (s) => { s = Math.round(Number(s) || 0); if (!s) return ''; const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + ':' + String(x).padStart(2, '0') }
-const fmtViews = (n) => { n = Number(n) || 0; if (!n) return ''; return (n >= 1e6 ? (n / 1e6).toFixed(1) + ' M' : n >= 1e3 ? Math.round(n / 1e3) + ' mil' : String(n)) + ' vistas' }
+const fmtViews = (n) => { if (typeof n === 'string' && n && !/^\d+$/.test(n)) return n + ' vistas'; n = Number(n) || 0; if (!n) return ''; return (n >= 1e6 ? (n / 1e6).toFixed(1) + ' M' : n >= 1e3 ? Math.round(n / 1e3) + ' mil' : String(n)) + ' vistas' }
 
 export function parseYtQuery(q) {
   const m = String(q).trim().match(/^@([\w.\-]+)\s*(.*)$/)
   return m ? { handle: m[1], words: m[2].trim() } : { handle: '', words: String(q).trim() }
+}
+
+// "@accion max", "@Acción Max", "@AccionMax terror": posibles @handles a probar, en orden.
+// Primero todo junto sin acentos (@accionmax), luego menos palabras + buscar el resto dentro del canal.
+export function ytHandleCandidates(q) {
+  const t = String(q || '').trim()
+  if (!t.startsWith('@')) return []
+  const words = t.slice(1).trim().split(/\s+/).filter(Boolean)
+  const clean = (w) => w.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.\-]/g, '')
+  const out = []
+  const add = (handle, w) => { if (handle.length >= 2 && !out.some((c) => c.handle.toLowerCase() === handle.toLowerCase() && c.words === w)) out.push({ handle, words: w }) }
+  for (let k = Math.min(words.length, 3); k >= 1; k--) add(words.slice(0, k).map(clean).join(''), words.slice(k).join(' '))
+  return out
 }
 
 async function canal(handle, words) {
@@ -36,17 +50,33 @@ async function canal(handle, words) {
 }
 
 async function busqueda(words) {
+  // Igual que /ytsearch y AndrewWife: YouTube región MX / es-419 primero
+  try {
+    const l = await searchYoutubeMx(words, MAX)
+    if (l?.length) return l.slice(0, MAX).map((v) => ({ id: v.videoId, title: v.title, seconds: v.seconds, channel: v.autor || '', views: v.views }))
+  } catch (e) { console.error('[ytpick] YouTube MX', errText(e).slice(0, 160)) }
   const r = await yts(words)
   return (r.videos || []).slice(0, MAX).map((v) => ({ id: v.videoId, title: v.title, seconds: v.seconds, channel: v.author?.name || '', views: v.views }))
 }
 
 export function createYtPicker({ onPick }) {
   async function listar(ctx, q, { quality = 'hd' } = {}) {
-    const { handle, words } = parseYtQuery(q)
-    const status = await ctx.reply(handle ? `Buscando en @${handle}...` : 'Buscando videos...')
+    let { handle, words } = parseYtQuery(q)
+    const cands = ytHandleCandidates(q)
+    const status = await ctx.reply(cands.length ? `Buscando el canal ${String(q).trim().split(/\s+/).slice(0, 3).join(' ')}...` : 'Buscando videos...')
     let items = []
     try {
-      items = handle ? await canal(handle, words) : await busqueda(words)
+      if (cands.length) {
+        let found = false
+        for (const c of cands) {
+          try {
+            const l = await canal(c.handle, c.words)
+            if (l.length) { items = l; handle = c.handle; words = c.words; found = true; break }
+          } catch (e) { console.error(`[ytpick] canal @${c.handle}:`, (errText(e).split('\n').find((l) => /ERROR/.test(l)) || '').slice(0, 160)) }
+        }
+        // El @canal no existe: búsqueda normal del texto (sin la @), nunca resultados al azar
+        if (!found) { handle = ''; words = String(q).trim().replace(/^@\s*/, ''); items = await busqueda(words) }
+      } else items = await busqueda(words)
     } catch (e) {
       const m = errText(e)
       console.error('[ytpick]', m)
