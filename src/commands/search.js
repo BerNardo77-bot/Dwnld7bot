@@ -1,5 +1,6 @@
 import fetch from 'node-fetch'
 import yts from 'yt-search'
+import { searchYoutubeMx, YTDLP_LANG_ARGS } from '../yt-search-mx.js'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { InputFile } from 'grammy'
@@ -221,17 +222,23 @@ function textoResultado(v, i, total) {
 // Búsqueda en YouTube sin API de pago. Devuelve objetos con los mismos campos que usa textoResultado.
 export async function buscarYouTubeLocal(q, n = 10) {
   let errs = []
+  // 1) InnerTube con región MX / es-419 (títulos originales en español; proxy primero si existe)
   try {
-    const r = await Promise.race([yts(q), new Promise((_, rej) => setTimeout(() => rej(new Error('yt-search tardó')), 20000))])
+    const l = await searchYoutubeMx(q, n)
+    if (l.length) return l
+  } catch (e) { errs.push(e.message) }
+  // 2) yt-search (respaldo)
+  try {
+    const r = await Promise.race([yts({ query: q, hl: 'es', gl: 'MX' }), new Promise((_, rej) => setTimeout(() => rej(new Error('yt-search tardó')), 20000))])
     const vids = (r?.videos || []).filter((v) => v.videoId).slice(0, n)
     if (vids.length) return vids.map((v) => ({ title: v.title, videoId: v.videoId, url: `https://www.youtube.com/watch?v=${v.videoId}`, duration: v.timestamp || '', autor: v.author?.name || '', views: v.views ? Number(v.views).toLocaleString('es-MX') : '', uploaded: v.ago || '', thumbnail: v.thumbnail || v.image || '' }))
   } catch (e) { errs.push('yt-search: ' + e.message) }
-  // yt-dlp: primero directo; con proxy solo si YouTube pide confirmar que no es un bot
+  // 3) yt-dlp en español: proxy primero (si existe) y luego directo
   const bin = resolveYtDlpBin() || 'yt-dlp'
   const proxy = String(process.env.YT_DLP_PROXY || process.env.YT_PROXY || '').trim()
-  for (const net of proxy ? [[], ['--proxy', proxy]] : [[]]) {
+  for (const net of proxy ? [['--proxy', proxy], []] : [[]]) {
     try {
-      const { stdout } = await execFileP(bin, [...net, '--flat-playlist', '-J', '--no-warnings', `ytsearch${n}:${q}`], { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
+      const { stdout } = await execFileP(bin, [...net, ...YTDLP_LANG_ARGS, '--flat-playlist', '-J', '--no-warnings', `ytsearch${n}:${q}`], { timeout: 60000, maxBuffer: 20 * 1024 * 1024 })
       const list = (JSON.parse(stdout)?.entries || []).filter((e) => e?.id)
       if (list.length) return list.map((e) => ({ title: e.title, videoId: e.id, url: `https://www.youtube.com/watch?v=${e.id}`, duration: durTxt(e.duration), autor: e.channel || e.uploader || '', views: e.view_count ? Number(e.view_count).toLocaleString('es-MX') : '', uploaded: '', thumbnail: e.thumbnails?.at?.(-1)?.url || '' }))
     } catch (e) { errs.push('yt-dlp: ' + String(e.stderr || e.message).split('\n').find((l) => /ERROR/.test(l)) || e.message) }
